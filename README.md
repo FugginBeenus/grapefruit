@@ -1,5 +1,5 @@
-# grapefruit
-A music library management app built with iPod Classic in mind. 
+# Grapefruit
+A music library management app built with iPod Classic and Rockbox in mind. 
 
 I noticed there were no apps that made switching from a streaming service like Apple Music or Spotify to using a music player like an iPod classic easy. 
 
@@ -12,5 +12,5 @@ Personally I still use Apple Music to have music when I don't bring my iPod, and
 Boom! All synced up. Takes maybe 5min. 
 
 **THIS APP CAN**
-- Import Apple Music playlists and match files with your local library to create the same playlist locally
+- Import Apple Music and Spotify playlists and match files with your local library to create the same playlist locally.
 - Use delta updating to only update what has changed in your library instead of having to sync your whole library. 
