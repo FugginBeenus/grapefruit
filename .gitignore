@@ -7,3 +7,6 @@ __pycache__/
 .env
 *.egg-info/
 python/core/__pycache__/
+python/build/
+python/dist/
+*.spec.bak

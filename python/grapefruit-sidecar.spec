@@ -1,0 +1,62 @@
+# -*- mode: python ; coding: utf-8 -*-
+# PyInstaller spec for Grapefruit sidecar
+
+a = Analysis(
+    ['sidecar_main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[
+        'core',
+        'core.ipod_device',
+        'core.apple_music_scraper',
+        'core.spotify_scraper',
+        'core.matcher',
+        'core.models',
+        'core.local_scanner',
+        'core.plex_client',
+        'core.plex_config',
+        'core.sync_engine',
+        'core.sync_db',
+        'core.file_copier',
+        'core.playlist_writer',
+        'core.library_xml_parser',
+        'core.rockbox_library',
+        'core.utils',
+        'session',
+        'rpc_handler',
+        'requests',
+        'bs4',
+        'rapidfuzz',
+        'music_tag',
+        'tinytag',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='grapefruit-sidecar',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)

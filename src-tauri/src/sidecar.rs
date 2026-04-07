@@ -41,17 +41,27 @@ pub async fn spawn_sidecar(
         ));
     }
 
-    log::info!("Spawning Python sidecar from: {}", script.display());
-
-    // Spawn python3 directly using tokio (no Tauri shell plugin needed)
-    let mut child = tokio::process::Command::new("python3")
-        .arg(script.to_string_lossy().as_ref())
-        .current_dir(&python_dir)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+    // Use compiled sidecar binary if available, otherwise fall back to python3
+    let mut child = if let Some(sidecar_bin) = resolve_sidecar_binary() {
+        log::info!("Spawning compiled sidecar: {}", sidecar_bin.display());
+        tokio::process::Command::new(&sidecar_bin)
+            .current_dir(sidecar_bin.parent().unwrap_or(&sidecar_bin))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
+    } else {
+        log::info!("Spawning Python sidecar from: {}", script.display());
+        tokio::process::Command::new("python3")
+            .arg(script.to_string_lossy().as_ref())
+            .current_dir(&python_dir)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
+    };
 
     let stdin = child
         .stdin
@@ -165,4 +175,36 @@ fn resolve_python_dir() -> Result<std::path::PathBuf, String> {
         "Could not find python directory. Tried: {}",
         dev_path.display()
     ))
+}
+
+/// Resolve sidecar binary path for bundled production builds.
+/// Returns Some(path) if a compiled sidecar exists, None to fall back to python3.
+fn resolve_sidecar_binary() -> Option<std::path::PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        let bin_dir = exe.parent()?;
+
+        // Tauri externalBin places binaries next to the main executable
+        let sidecar = if cfg!(target_os = "windows") {
+            bin_dir.join("grapefruit-sidecar.exe")
+        } else {
+            bin_dir.join("grapefruit-sidecar")
+        };
+
+        if sidecar.exists() {
+            return Some(sidecar);
+        }
+
+        // macOS: also check inside .app bundle Resources
+        #[cfg(target_os = "macos")]
+        {
+            let resources = bin_dir.parent()
+                .map(|p| p.join("Resources").join("grapefruit-sidecar"));
+            if let Some(ref path) = resources {
+                if path.exists() {
+                    return resources;
+                }
+            }
+        }
+    }
+    None
 }
