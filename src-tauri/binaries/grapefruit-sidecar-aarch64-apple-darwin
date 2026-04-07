@@ -1,0 +1,6 @@
+#!/bin/bash
+# Dev wrapper: runs the Python sidecar directly
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON_DIR="$SCRIPT_DIR/../../python"
+cd "$PYTHON_DIR"
+exec python3 sidecar_main.py

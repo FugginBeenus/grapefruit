@@ -1,0 +1,199 @@
+@import "tailwindcss";
+
+@theme {
+  /* Grapefruit brand */
+  --color-gf: #FF6347;
+  --color-gf-light: #FF7F66;
+  --color-gf-dark: #E5503A;
+  --color-gf-glow: rgba(255, 99, 71, 0.15);
+  --color-gf-glow-strong: rgba(255, 99, 71, 0.25);
+
+  /* Backgrounds — rich layered dark */
+  --color-bg-base: #0D0D0D;
+  --color-bg-primary: #141414;
+  --color-bg-raised: #1A1A1A;
+  --color-bg-surface: #212121;
+  --color-bg-elevated: #292929;
+  --color-bg-hover: #2F2F2F;
+  --color-bg-active: #363636;
+
+  /* Borders */
+  --color-b: #333333;
+  --color-b-light: #444444;
+  --color-b-focus: #FF6347;
+
+  /* Text */
+  --color-t: #F0F0F0;
+  --color-t-secondary: #B8B8B8;
+  --color-t-muted: #888888;
+  --color-t-inverse: #0D0D0D;
+
+  /* Semantic — status */
+  --color-ok: #34D399;
+  --color-ok-muted: rgba(52, 211, 153, 0.12);
+  --color-warn: #FBBF24;
+  --color-warn-muted: rgba(251, 191, 36, 0.12);
+  --color-err: #F87171;
+  --color-err-muted: rgba(248, 113, 113, 0.12);
+  --color-info: #60A5FA;
+  --color-info-muted: rgba(96, 165, 250, 0.12);
+
+  /* Fonts */
+  --font-sans: "Inter", -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+/* ── Global ──────────────────────────────────── */
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background-color: var(--color-bg-base);
+  color: var(--color-t);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── Scrollbar ───────────────────────────────── */
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* ── Focus ring ──────────────────────────────── */
+
+*:focus-visible {
+  outline: 2px solid var(--color-gf);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Selection ───────────────────────────────── */
+
+::selection {
+  background: var(--color-gf-glow-strong);
+  color: white;
+}
+
+/* ── Transitions ─────────────────────────────── */
+
+.fade-in {
+  animation: fadeIn 250ms ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--color-gf-glow); }
+  50% { box-shadow: 0 0 12px 4px var(--color-gf-glow); }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ── Button base ─────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 150ms ease;
+  cursor: pointer;
+  border: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-gf);
+  color: white;
+}
+
+.btn-primary:not(:disabled):hover {
+  background: var(--color-gf-dark);
+  box-shadow: 0 0 20px var(--color-gf-glow);
+}
+
+.btn-secondary {
+  background: var(--color-bg-surface);
+  color: var(--color-t-secondary);
+  border: 1px solid var(--color-b);
+}
+
+.btn-secondary:not(:disabled):hover {
+  background: var(--color-bg-hover);
+  color: var(--color-t);
+  border-color: var(--color-b-light);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-t-secondary);
+}
+
+.btn-ghost:not(:disabled):hover {
+  background: var(--color-bg-hover);
+  color: var(--color-t);
+}
+
+.btn-danger {
+  background: var(--color-err-muted);
+  color: var(--color-err);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+}
+
+.btn-danger:not(:disabled):hover {
+  background: rgba(248, 113, 113, 0.2);
+}
+
+/* ── Input base ──────────────────────────────── */
+
+.input {
+  width: 100%;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-b);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--color-t);
+  transition: border-color 150ms, box-shadow 150ms;
+}
+
+.input::placeholder { color: var(--color-t-muted); }
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-gf);
+  box-shadow: 0 0 0 3px var(--color-gf-glow);
+}
+
+/* ── Card ────────────────────────────────────── */
+
+.card {
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-b);
+  border-radius: 12px;
+}
+
+.card-elevated {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-b-light);
+  border-radius: 12px;
+}

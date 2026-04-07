@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src-tauri/target/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+*.egg-info/
+python/core/__pycache__/
