@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     strategy:
@@ -17,7 +20,7 @@ jobs:
           - platform: macos-latest
             rust_target: aarch64-apple-darwin
             sidecar_name: grapefruit-sidecar-aarch64-apple-darwin
-          - platform: macos-13
+          - platform: macos-latest
             rust_target: x86_64-apple-darwin
             sidecar_name: grapefruit-sidecar-x86_64-apple-darwin
           - platform: windows-latest
@@ -32,12 +35,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
