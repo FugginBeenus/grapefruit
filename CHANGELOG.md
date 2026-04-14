@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - 2026-04-13
+## [2.1.0] - 2026-04-13
 
 ### Major: Pivot to Robust Music Manager
 
