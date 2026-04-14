@@ -41,16 +41,24 @@ pub async fn spawn_sidecar(
         ));
     }
 
-    // Use compiled sidecar binary if available, otherwise fall back to python3
-    let mut child = if let Some(sidecar_bin) = resolve_sidecar_binary() {
-        log::info!("Spawning compiled sidecar: {}", sidecar_bin.display());
-        tokio::process::Command::new(&sidecar_bin)
-            .current_dir(sidecar_bin.parent().unwrap_or(&sidecar_bin))
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
+    // In dev mode (python/ source dir exists), always use python3 directly.
+    // Only use the compiled sidecar binary in production builds where the
+    // python source dir won't exist.
+    let use_compiled = !script.exists() || resolve_sidecar_binary().is_some() && !python_dir.join("core").exists();
+
+    let mut child = if use_compiled {
+        if let Some(sidecar_bin) = resolve_sidecar_binary() {
+            log::info!("Spawning compiled sidecar: {}", sidecar_bin.display());
+            tokio::process::Command::new(&sidecar_bin)
+                .current_dir(sidecar_bin.parent().unwrap_or(&sidecar_bin))
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
+        } else {
+            return Err("No compiled sidecar binary found and python source not available".into());
+        }
     } else {
         log::info!("Spawning Python sidecar from: {}", script.display());
         tokio::process::Command::new("python3")

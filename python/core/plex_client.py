@@ -158,6 +158,123 @@ class PlexClient:
                     lookup[basename] = t
         return lookup
 
+    # ── Detailed Metadata Fetch ───────────────────────────────────────
+
+    def get_track_details(self, rating_key: str) -> dict:
+        """Fetch full metadata for a single track by ratingKey.
+
+        Returns dict with: title, artist, album, albumArtist, year, genre,
+        trackNumber, discNumber, duration_ms, file, thumb.
+        """
+        try:
+            resp = self._get(f"/library/metadata/{rating_key}")
+            container = resp.get("MediaContainer", resp)
+            items = container.get("Metadata", [])
+            if not items:
+                return {}
+            t = items[0]
+
+            file_path = ""
+            media = t.get("Media", [])
+            if media:
+                parts = media[0].get("Part", [])
+                if parts:
+                    file_path = parts[0].get("file", "")
+
+            return {
+                "ratingKey": str(t.get("ratingKey", "")),
+                "title": t.get("title", ""),
+                "artist": t.get("grandparentTitle", ""),
+                "album": t.get("parentTitle", ""),
+                "albumArtist": t.get("grandparentTitle", ""),
+                "year": t.get("parentYear") or t.get("year"),
+                "genre": (t.get("Genre", [{}])[0].get("tag", "")
+                          if t.get("Genre") else ""),
+                "trackNumber": t.get("index"),
+                "discNumber": t.get("parentIndex"),
+                "duration_ms": t.get("duration"),
+                "file": file_path,
+                "thumb": t.get("thumb", ""),
+            }
+        except Exception as e:
+            raise PlexClientError(f"Failed to get track details: {e}") from e
+
+    def get_track_artwork(self, thumb_path: str) -> bytes | None:
+        """Download artwork for a track given its thumb path.
+
+        Returns raw image bytes or None if no artwork.
+        """
+        if not thumb_path:
+            return None
+        try:
+            url = self._base + thumb_path
+            resp = self._session.get(url, timeout=15)
+            resp.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "")
+            if "image" in content_type or len(resp.content) > 100:
+                return resp.content
+            return None
+        except Exception:
+            return None
+
+    def get_all_tracks_detailed(self, section_key: str,
+                                progress_callback=None) -> list[dict]:
+        """Fetch ALL tracks with extended metadata (year, genre, track#, disc#, thumb).
+
+        Like get_all_tracks but includes extra fields needed for metadata sync.
+        """
+        try:
+            resp = self._get(
+                f"/library/sections/{section_key}/all",
+                params={"type": 10, "includeGenres": 1},
+                timeout=60,
+            )
+            container = resp.get("MediaContainer", resp)
+            tracks_data = container.get("Metadata", [])
+
+            total = len(tracks_data)
+            results = []
+            for i, t in enumerate(tracks_data):
+                if progress_callback and i % 500 == 0:
+                    progress_callback(i, total)
+
+                file_path = ""
+                media = t.get("Media", [])
+                if media:
+                    parts = media[0].get("Part", [])
+                    if parts:
+                        file_path = parts[0].get("file", "")
+
+                genre = ""
+                genres = t.get("Genre", [])
+                if genres:
+                    genre = genres[0].get("tag", "")
+
+                results.append({
+                    "ratingKey": str(t.get("ratingKey", "")),
+                    "title": t.get("title", ""),
+                    "artist": t.get("grandparentTitle", ""),
+                    "album": t.get("parentTitle", ""),
+                    "albumArtist": t.get("grandparentTitle", ""),
+                    "year": t.get("parentYear") or t.get("year"),
+                    "genre": genre,
+                    "trackNumber": t.get("index"),
+                    "discNumber": t.get("parentIndex"),
+                    "duration_ms": t.get("duration"),
+                    "file": file_path,
+                    "thumb": t.get("thumb", ""),
+                })
+
+            if progress_callback:
+                progress_callback(total, total)
+
+            return results
+
+        except PlexClientError:
+            raise
+        except Exception as e:
+            raise PlexClientError(f"Failed to fetch detailed tracks: {e}") from e
+
     # ── Pull Direction (Plex → iPod) ─────────────────────────────────
 
     def get_playlists(self) -> list[dict]:

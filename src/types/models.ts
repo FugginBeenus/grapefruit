@@ -108,12 +108,16 @@ export interface DuplicateGroup {
 }
 
 export interface SyncPlan {
-  files_to_copy: string[];
-  files_to_delete: string[];
-  files_unchanged: string[];
+  files_to_copy: number;
+  files_to_delete: number;
+  files_unchanged: number;
   total_copy_bytes: number;
   total_delete_bytes: number;
   device_free_bytes: number;
+  fits_on_device: boolean;
+  shortfall_bytes: number;
+  _copy_paths: string[];
+  _delete_paths: string[];
 }
 
 export interface ProgressEvent {
@@ -122,4 +126,112 @@ export interface ProgressEvent {
   total: number;
   message?: string;
   state?: string;
+}
+
+export interface TrackMetadata {
+  path: string;
+  title: string;
+  artist: string;
+  album: string;
+  albumartist: string;
+  track_number: number | null;
+  disc_number: number | null;
+  year: number | null;
+  genre: string;
+  comment: string;
+  has_artwork: boolean;
+  artwork_mime: string;
+}
+
+export interface AlbumArt {
+  has_artwork: boolean;
+  mime?: string;
+  data?: string; // base64
+}
+
+export interface UndoAction {
+  type: string;
+  timestamp: number;
+  detail: string;
+}
+
+export interface LibraryStats {
+  total_tracks: number;
+  total_size: number;
+  total_duration: number;
+  total_albums: number;
+  total_artists: number;
+  formats: Record<string, number>;
+  genres: Record<string, number>;
+}
+
+/* ── Plex Metadata Sync ────────────────────── */
+
+export interface MetadataFieldDiff {
+  field: string;
+  device_value: string;
+  plex_value: string;
+}
+
+export interface MetadataTrackDiff {
+  path: string;
+  title: string;
+  artist: string;
+  album: string;
+  plex_rating_key: string;
+  fields: MetadataFieldDiff[];
+}
+
+export interface MetadataDiffResult {
+  total_device_tracks: number;
+  matched_to_plex: number;
+  tracks_with_diffs: number;
+  tracks_unchanged: number;
+  unmatched: number;
+  diffs: MetadataTrackDiff[];
+}
+
+export interface MetadataPullResult {
+  updated: number;
+  errors: string[];
+  total: number;
+}
+
+/* ── Library Health Check ──────────────────── */
+
+export interface HealthIssueTrack {
+  path: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  filename?: string;
+  error?: string;
+}
+
+export interface AlbumInconsistency {
+  album: string;
+  artists: string[];
+  track_count: number;
+}
+
+export interface HealthCheckResult {
+  total_tracks: number;
+  issues: {
+    missing_title: HealthIssueTrack[];
+    missing_artist: HealthIssueTrack[];
+    missing_album: HealthIssueTrack[];
+    no_artwork: HealthIssueTrack[];
+    broken_files: HealthIssueTrack[];
+    inconsistent_albums: AlbumInconsistency[];
+  };
+  summary: Record<string, number>;
+}
+
+/* ── Auto Organize ─────────────────────────── */
+
+export interface OrganizeResult {
+  moved: number;
+  errors: string[];
+  dry_run: boolean;
+  plan?: { from: string; to: string }[];
 }

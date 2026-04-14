@@ -1,4 +1,6 @@
+import getpass
 import os
+import platform
 import shutil
 import subprocess
 import threading
@@ -9,10 +11,9 @@ from core.models import DeviceInfo, DeviceFirmware
 
 
 class DeviceDetector:
-    """Monitors /Volumes/ for iPod connections."""
+    """Monitors for iPod connections (macOS, Windows, Linux)."""
 
     POLL_INTERVAL = 2.0
-    VOLUMES_PATH = Path("/Volumes")
 
     def __init__(self):
         self._known_devices: dict[str, DeviceInfo] = {}
@@ -24,23 +25,70 @@ class DeviceDetector:
     def scan_once(self) -> list[DeviceInfo]:
         """One-shot scan for iPod devices."""
         devices = []
-        if not self.VOLUMES_PATH.exists():
-            return devices
-
-        try:
-            volumes = list(self.VOLUMES_PATH.iterdir())
-        except PermissionError:
-            return devices
-
-        for vol in volumes:
+        for vol in self._find_volumes():
             if not vol.is_dir():
                 continue
             firmware = self._identify_firmware(vol)
             if firmware != DeviceFirmware.UNKNOWN:
                 device = self._build_device_info(vol, firmware)
                 devices.append(device)
-
         return devices
+
+    def _find_volumes(self) -> list[Path]:
+        """Return candidate mount points to check, based on OS."""
+        system = platform.system()
+        if system == "Darwin":
+            return self._find_volumes_macos()
+        elif system == "Windows":
+            return self._find_volumes_windows()
+        elif system == "Linux":
+            return self._find_volumes_linux()
+        return []
+
+    def _find_volumes_macos(self) -> list[Path]:
+        """Scan /Volumes/ for mounted devices (macOS)."""
+        volumes_path = Path("/Volumes")
+        if not volumes_path.exists():
+            return []
+        try:
+            return [v for v in volumes_path.iterdir() if v.is_dir()]
+        except PermissionError:
+            return []
+
+    def _find_volumes_windows(self) -> list[Path]:
+        """Scan drive letters D:\\ through Z:\\ for iPod volumes (Windows)."""
+        volumes = []
+        for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = Path(f"{letter}:\\")
+            if not drive.exists():
+                continue
+            # Only include drives that look like an iPod
+            if (drive / "iPod_Control").is_dir() or (drive / ".rockbox").is_dir():
+                volumes.append(drive)
+        return volumes
+
+    def _find_volumes_linux(self) -> list[Path]:
+        """Scan /media/{user}/ and /mnt/ for mounted iPod volumes (Linux)."""
+        volumes = []
+        # /media/<username>/<volume>
+        user_media = Path(f"/media/{getpass.getuser()}")
+        if user_media.is_dir():
+            try:
+                for vol in user_media.iterdir():
+                    if vol.is_dir():
+                        volumes.append(vol)
+            except PermissionError:
+                pass
+        # /mnt/<volume>
+        mnt = Path("/mnt")
+        if mnt.is_dir():
+            try:
+                for vol in mnt.iterdir():
+                    if vol.is_dir():
+                        volumes.append(vol)
+            except PermissionError:
+                pass
+        return volumes
 
     def start_monitoring(self, on_connect=None, on_disconnect=None):
         """Start background polling for device changes."""
@@ -124,7 +172,18 @@ class DeviceDetector:
             return 0, 0, 0
 
     def _get_model(self, mount_point: Path) -> str:
-        """Try to identify device model via system_profiler."""
+        """Try to identify device model using OS-specific tools."""
+        system = platform.system()
+        if system == "Darwin":
+            return self._get_model_macos()
+        elif system == "Windows":
+            return self._get_model_windows(mount_point)
+        elif system == "Linux":
+            return self._get_model_linux(mount_point)
+        return ""
+
+    def _get_model_macos(self) -> str:
+        """Identify device model via system_profiler (macOS)."""
         try:
             import plistlib
             result = subprocess.run(
@@ -133,11 +192,47 @@ class DeviceDetector:
             )
             if result.returncode != 0:
                 return ""
-
             data = plistlib.loads(result.stdout)
             return self._find_ipod_in_usb(data)
         except Exception:
             return ""
+
+    def _get_model_windows(self, mount_point: Path) -> str:
+        """Identify device model via wmic or volume name (Windows)."""
+        try:
+            drive_letter = str(mount_point).rstrip("\\")
+            result = subprocess.run(
+                ["wmic", "logicaldisk", "where", f"DeviceID='{drive_letter}'",
+                 "get", "VolumeName", "/value"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if line.startswith("VolumeName="):
+                        name = line.split("=", 1)[1].strip()
+                        if name:
+                            return name
+        except Exception:
+            pass
+        return mount_point.name
+
+    def _get_model_linux(self, mount_point: Path) -> str:
+        """Identify device model via lsblk or volume name (Linux)."""
+        try:
+            result = subprocess.run(
+                ["lsblk", "-no", "LABEL", "-J"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                import json
+                data = json.loads(result.stdout)
+                for device in data.get("blockdevices", []):
+                    label = device.get("label", "")
+                    if label and label.lower() in mount_point.name.lower():
+                        return label
+        except Exception:
+            pass
+        return mount_point.name
 
     def _find_ipod_in_usb(self, data, depth=0) -> str:
         """Recursively search USB data for iPod device info."""

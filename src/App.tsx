@@ -1,27 +1,25 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "./components/layout/AppLayout";
-import Welcome from "./pages/Welcome";
 import Library from "./pages/Library";
+import Playlists from "./pages/Playlists";
 import ImportFlow from "./pages/ImportFlow";
-import PlaylistDetail from "./pages/PlaylistDetail";
-import SyncMusic from "./pages/SyncMusic";
-import Duplicates from "./pages/Duplicates";
-import PlexSync from "./pages/PlexSync";
-import PlexSettings from "./pages/PlexSettings";
+import Sync from "./pages/Sync";
+import Settings from "./pages/Settings";
+import Tools from "./pages/Tools";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          <Route index element={<Welcome />} />
+          <Route index element={<Navigate to="/library" replace />} />
           <Route path="library" element={<Library />} />
+          <Route path="playlists" element={<Playlists />} />
+          <Route path="playlists/:name" element={<Playlists />} />
           <Route path="import" element={<ImportFlow />} />
-          <Route path="playlist/:name" element={<PlaylistDetail />} />
-          <Route path="sync" element={<SyncMusic />} />
-          <Route path="duplicates" element={<Duplicates />} />
-          <Route path="plex-sync" element={<PlexSync />} />
-          <Route path="plex-settings" element={<PlexSettings />} />
+          <Route path="tools" element={<Tools />} />
+          <Route path="sync" element={<Sync />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>
     </BrowserRouter>

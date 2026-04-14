@@ -10,7 +10,7 @@ export function MatchRow({ result, index }: MatchRowProps) {
   const { playlist_track, status, best_match } = result;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b border-b/50 hover:bg-bg-hover transition-colors">
+    <div className="flex items-center gap-3 px-4 py-3 border-b border-b-[rgba(255,255,255,0.06)] hover:bg-bg-hover transition-colors">
       <span className="w-8 text-right text-t-muted text-[11px] tabular-nums shrink-0">
         {index + 1}
       </span>

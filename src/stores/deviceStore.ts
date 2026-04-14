@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { DeviceInfo, DeviceTrack, PlaylistInfo } from "../types/models";
 import { scanDevices, setDevice } from "../api/device";
 import { scanDeviceLibrary, getPlaylists } from "../api/library";
+import { rpcCall } from "../api/sidecar";
 
 interface DeviceState {
   devices: DeviceInfo[];
@@ -15,6 +16,7 @@ interface DeviceState {
 
   scanForDevices: () => Promise<void>;
   selectDevice: (device: DeviceInfo) => Promise<void>;
+  connectLocalLibrary: (path: string) => Promise<void>;
   refreshLibrary: () => Promise<void>;
   refreshPlaylists: () => Promise<void>;
   disconnect: () => void;
@@ -49,6 +51,18 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
     await setDevice(device.mount_point);
     // Load library and playlists
     await Promise.all([get().refreshLibrary(), get().refreshPlaylists()]);
+  },
+
+  connectLocalLibrary: async (path: string) => {
+    set({ scanning: true, error: null });
+    try {
+      const device = await rpcCall<DeviceInfo>("set_local_library", { path });
+      set({ selectedDevice: device, scanning: false });
+      await Promise.all([get().refreshLibrary(), get().refreshPlaylists()]);
+    } catch (e) {
+      set({ scanning: false, error: String(e) });
+      throw e; // re-throw so callers can handle
+    }
   },
 
   refreshLibrary: async () => {

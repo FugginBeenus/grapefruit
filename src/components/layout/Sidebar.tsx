@@ -1,47 +1,84 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useDeviceStore } from "../../stores/deviceStore";
+import { usePlexStore } from "../../stores/plexStore";
+import { open } from "@tauri-apps/plugin-dialog";
+
+const SAVED_PATH_KEY = "grapefruit:localLibraryPath";
 
 const NAV_ITEMS = [
   {
-    section: "Music",
+    section: "Manage",
     items: [
-      { to: "/library", label: "Library", icon: IconLibrary },
-      { to: "/import", label: "Import", icon: IconImport },
-      { to: "/sync", label: "Sync", icon: IconSync },
-      { to: "/duplicates", label: "Duplicates", icon: IconDuplicates },
+      { to: "/library", label: "Library", icon: IconLibrary, color: "cyan" as const },
+      { to: "/playlists", label: "Playlists", icon: IconPlaylist, color: "violet" as const },
+      { to: "/import", label: "Import", icon: IconImport, color: "pink" as const },
+      { to: "/tools", label: "Tools", icon: IconTools, color: "amber" as const },
     ],
   },
   {
-    section: "Plex",
+    section: "Sync",
     items: [
-      { to: "/plex-sync", label: "Plex Sync", icon: IconPlex },
-      { to: "/plex-settings", label: "Settings", icon: IconSettings },
+      { to: "/sync", label: "Sync", icon: IconSync, color: "emerald" as const },
+      { to: "/settings", label: "Settings", icon: IconSettings, color: "info" as const },
     ],
   },
 ];
 
 export function Sidebar() {
   const navigate = useNavigate();
-  const { selectedDevice, playlists, scanning, scanForDevices } = useDeviceStore();
+  const { selectedDevice, playlists, scanning, scanForDevices, connectLocalLibrary, disconnect, error } = useDeviceStore();
+  const plexConfig = usePlexStore((s) => s.config);
+  const loadPlexConfig = usePlexStore((s) => s.loadConfig);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     scanForDevices();
-  }, [scanForDevices]);
+    loadPlexConfig();
+  }, [scanForDevices, loadPlexConfig]);
+
+  const handleBrowseFolder = async () => {
+    setFolderError(null);
+    try {
+      // Default to saved path or music_library_path from Settings
+      const defaultPath = localStorage.getItem(SAVED_PATH_KEY) || plexConfig?.music_library_path || undefined;
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select your music library folder",
+        defaultPath,
+      });
+      if (!selected) return; // user cancelled
+      const folderPath = typeof selected === "string" ? selected : selected;
+      setConnecting(true);
+      await connectLocalLibrary(folderPath);
+      localStorage.setItem(SAVED_PATH_KEY, folderPath);
+    } catch (e) {
+      setFolderError(String(e));
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = () => {
+    disconnect();
+  };
+
+  const isLocal = selectedDevice?.firmware === "local";
 
   return (
-    <aside className="flex flex-col w-[240px] min-w-[240px] bg-bg-primary border-r border-b h-full select-none">
-      {/* App logo */}
-      <div className="h-8 flex items-center px-5 shrink-0" data-tauri-drag-region="">
-        {/* spacer for window chrome */}
-      </div>
+    <aside className="flex flex-col w-[240px] min-w-[240px] border-r border-b h-full select-none" style={{ background: "linear-gradient(180deg, #12121A 0%, #0B0B10 100%)" }}>
+      {/* Drag spacer */}
+      <div className="h-3 shrink-0" data-tauri-drag-region="" />
 
+      {/* App logo */}
       <div className="px-4 pb-4">
         <NavLink to="/" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-gf flex items-center justify-center shadow-lg shadow-gf/20">
-            <span className="text-white text-sm font-black">G</span>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg, #FF7F66 0%, #E5503A 100%)", boxShadow: "0 4px 16px rgba(255, 99, 71, 0.3), 0 0 24px rgba(255, 99, 71, 0.15)" }}>
+            <span className="text-white text-base font-black drop-shadow-sm">G</span>
           </div>
-          <span className="text-[15px] font-bold text-t tracking-tight group-hover:text-gf transition-colors">
+          <span className="text-[16px] font-semibold text-t tracking-tight group-hover:text-gf transition-colors">
             Grapefruit
           </span>
         </NavLink>
@@ -50,10 +87,10 @@ export function Sidebar() {
       {/* Device card */}
       <div className="px-3 mb-3">
         {selectedDevice ? (
-          <div className="card p-3 space-y-2.5">
+          <div className="card p-3 space-y-2.5 border-ok/30">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-ok-muted flex items-center justify-center">
-                <IconDevice className="w-4 h-4 text-ok" />
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLocal ? "bg-info-muted" : "bg-ok-muted"}`}>
+                {isLocal ? <IconFolder className="w-4 h-4 text-info" /> : <IconDevice className="w-4 h-4 text-ok" />}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-semibold text-t truncate leading-tight">
@@ -61,77 +98,127 @@ export function Sidebar() {
                 </p>
                 <p className="text-[10px] text-t-muted leading-tight">{selectedDevice.model || "Connected"}</p>
               </div>
+              <button
+                onClick={handleDisconnect}
+                className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-t-muted hover:text-t hover:bg-bg-hover transition-colors"
+                title="Disconnect"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
             <StorageIndicator used={selectedDevice.used_bytes} total={selectedDevice.capacity_bytes} />
+            <DeviceFormatBreakdown />
           </div>
         ) : (
-          <button
-            onClick={() => scanForDevices()}
-            disabled={scanning}
-            className="w-full card p-3 flex items-center gap-2.5 hover:border-b-light transition-colors group"
-          >
-            <div className="w-8 h-8 rounded-lg bg-bg-surface flex items-center justify-center group-hover:bg-bg-elevated transition-colors">
-              <IconDevice className="w-4 h-4 text-t-muted" />
-            </div>
-            <div className="text-left">
-              <p className="text-[12px] font-medium text-t-secondary">
-                {scanning ? "Scanning..." : "No device"}
+          <div className="space-y-2">
+            <button
+              onClick={() => scanForDevices()}
+              disabled={scanning}
+              className="w-full card p-3 flex items-center gap-2.5 hover:border-b-light transition-colors group"
+            >
+              <div className="w-8 h-8 rounded-lg bg-bg-surface flex items-center justify-center group-hover:bg-bg-elevated transition-colors">
+                <IconDevice className="w-4 h-4 text-t-muted" />
+              </div>
+              <div className="text-left">
+                <p className="text-[12px] font-medium text-t-secondary">
+                  {scanning ? "Scanning..." : "No device"}
+                </p>
+                <p className="text-[10px] text-t-secondary">Click to scan</p>
+              </div>
+            </button>
+
+            <button
+              onClick={handleBrowseFolder}
+              disabled={connecting}
+              className="w-full card p-2.5 flex items-center gap-2.5 hover:border-b-light transition-colors group"
+            >
+              <div className="w-7 h-7 rounded-md bg-bg-surface flex items-center justify-center group-hover:bg-bg-elevated transition-colors">
+                {connecting
+                  ? <div className="w-3.5 h-3.5 border-2 border-t-transparent border-info rounded-full animate-spin" />
+                  : <IconFolder className="w-3.5 h-3.5 text-t-muted" />}
+              </div>
+              <p className="text-[11px] text-t-secondary">
+                {connecting ? "Connecting..." : "Browse local folder"}
               </p>
-              <p className="text-[10px] text-t-secondary">Click to scan</p>
-            </div>
-          </button>
+            </button>
+            {folderError && (
+              <p className="text-[10px] text-err px-1">{folderError}</p>
+            )}
+          </div>
         )}
       </div>
 
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto px-3 space-y-5">
-        {NAV_ITEMS.map(({ section, items }) => (
+      <div className="flex-1 overflow-y-auto px-3 space-y-1">
+        {NAV_ITEMS.map(({ section, items }, idx) => {
+          const sectionColor = idx === 0 ? "bg-cyan" : "bg-emerald";
+          return (
           <div key={section}>
-            <p className="px-2 mb-1.5 text-[10px] font-semibold tracking-[0.08em] text-t-secondary uppercase">
-              {section}
-            </p>
+            {idx > 0 && <div className="border-b border-b-[rgba(255,255,255,0.06)] mx-2 my-3" />}
+            <div className="flex items-center gap-1.5 px-2 mb-1.5">
+              <div className={`w-[2px] h-3 rounded-full ${sectionColor}`} />
+              <p className="text-[10px] font-semibold tracking-[0.08em] text-t-secondary uppercase">
+                {section}
+              </p>
+            </div>
             <nav className="space-y-0.5">
-              {items.map(({ to, label, icon: Icon }) => (
+              {items.map(({ to, label, icon: Icon, color }) => (
                 <NavLink
                   key={to}
                   to={to}
                   className={({ isActive }) =>
-                    `flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] transition-all ${
+                    `flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-all duration-150 ${
                       isActive
-                        ? "bg-gf-glow text-gf font-semibold"
+                        ? "bg-bg-hover/60 text-t font-semibold"
                         : "text-t-secondary hover:bg-bg-hover hover:text-t"
                     }`
                   }
                 >
-                  <Icon className="w-[18px] h-[18px]" />
-                  <span>{label}</span>
+                  {({ isActive }) => (
+                    <>
+                      <div className={`icon-box icon-box-sm icon-box-${color} ${isActive ? "ring-1 ring-white/10" : ""}`}>
+                        <Icon className="w-[14px] h-[14px]" />
+                      </div>
+                      <span>{label}</span>
+                    </>
+                  )}
                 </NavLink>
               ))}
             </nav>
           </div>
-        ))}
+        );
+        })}
 
         {/* Playlists */}
         {playlists.length > 0 && (
           <div>
-            <p className="px-2 mb-1.5 text-[10px] font-semibold tracking-[0.08em] text-t-secondary uppercase">
-              Playlists
-            </p>
+            <div className="border-b border-b-[rgba(255,255,255,0.06)] mx-2 my-3" />
+            <div className="flex items-center gap-1.5 px-2 mb-1.5">
+              <div className="w-[2px] h-3 rounded-full bg-violet" />
+              <p className="text-[10px] font-semibold tracking-[0.08em] text-t-secondary uppercase">
+                Playlists
+              </p>
+              <span className="ml-auto badge badge-violet text-[9px]">
+                {playlists.length}
+              </span>
+            </div>
             <nav className="space-y-0.5">
               {playlists.map((pl) => (
                 <NavLink
                   key={pl.path}
-                  to={`/playlist/${encodeURIComponent(pl.name)}`}
+                  to={`/playlists/${encodeURIComponent(pl.name)}`}
                   className={({ isActive }) =>
-                    `flex items-center justify-between rounded-lg px-2.5 py-[7px] text-[13px] transition-all ${
+                    `flex items-center justify-between rounded-lg pl-5 pr-2.5 py-1.5 text-[12px] transition-all duration-150 ${
                       isActive
-                        ? "bg-gf-glow text-gf font-semibold"
+                        ? "bg-violet-glow text-violet font-semibold"
                         : "text-t-secondary hover:bg-bg-hover hover:text-t"
                     }`
                   }
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <IconPlaylist className="w-[18px] h-[18px] shrink-0" />
+                  <div className="flex items-center gap-2 min-w-0">
+                    <IconPlaylist className="w-[16px] h-[16px] shrink-0" />
                     <span className="truncate">{pl.name}</span>
                   </div>
                   <span className="text-[10px] text-t-muted ml-2 shrink-0">{pl.track_count}</span>
@@ -142,16 +229,8 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Import button at bottom */}
-      <div className="p-3 mt-auto">
-        <button
-          onClick={() => navigate("/import")}
-          className="btn btn-primary w-full text-[12px] py-2"
-        >
-          <IconPlus className="w-4 h-4" />
-          Import Playlist
-        </button>
-      </div>
+      {/* Bottom spacer */}
+      <div className="pb-3 mt-auto" />
     </aside>
   );
 }
@@ -168,16 +247,38 @@ function StorageIndicator({ used, total }: { used: number; total: number }) {
 
   return (
     <div>
-      <div className="h-1.5 bg-bg-base rounded-full overflow-hidden">
+      <div className="h-1 bg-bg-base rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all ${pct > 90 ? "bg-err" : "bg-gf"}`}
-          style={{ width: `${pct}%` }}
+          className="h-full rounded-full transition-all duration-300"
+          style={{
+            width: `${pct}%`,
+            background: pct > 90
+              ? "var(--color-err)"
+              : "linear-gradient(90deg, var(--color-gf-dark), var(--color-gf))",
+          }}
         />
       </div>
       <p className="text-[10px] text-t-muted mt-1">
         {fmt(free)} free of {fmt(total)}
       </p>
     </div>
+  );
+}
+
+function DeviceFormatBreakdown() {
+  const tracks = useDeviceStore((s) => s.tracks);
+  if (tracks.length === 0) return null;
+
+  const formats = new Set<string>();
+  for (const t of tracks) {
+    if (t.format) formats.add(t.format.toUpperCase());
+  }
+  const formatStr = Array.from(formats).sort().join(", ");
+
+  return (
+    <p className="text-[10px] text-t-muted leading-tight">
+      {tracks.length.toLocaleString()} tracks{formatStr ? ` \u00B7 ${formatStr}` : ""}
+    </p>
   );
 }
 
@@ -253,6 +354,22 @@ function IconPlus({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+  );
+}
+
+function IconTools({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437l1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008z" />
+    </svg>
+  );
+}
+
+function IconFolder({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
     </svg>
   );
 }

@@ -103,6 +103,23 @@ class SyncEngine:
             if progress_callback and (i % 100 == 0 or i == total - 1):
                 progress_callback(i + 1, total)
 
+        # ── Phase 3b: For DELTA mode, only copy changed files ─────────
+        if mode == SyncMode.DELTA:
+            delta_copy = []
+            delta_bytes = 0
+            for file_path, source_root in files_to_copy:
+                record = self._db.get_record(str(file_path))
+                try:
+                    stat = file_path.stat()
+                except OSError:
+                    continue
+                # Copy if no record exists or mtime/size changed
+                if not record or record.mtime != stat.st_mtime or record.file_size != stat.st_size:
+                    delta_copy.append((file_path, source_root))
+                    delta_bytes += stat.st_size
+            files_to_copy = delta_copy
+            total_copy_bytes = delta_bytes
+
         # ── Phase 4: For FULL mode, find device files to delete ──────
         files_to_delete = []
         total_delete_bytes = 0

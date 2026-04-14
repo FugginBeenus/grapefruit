@@ -1,19 +1,26 @@
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
+import { StatusBar } from "../StatusBar";
+import { Toast } from "../Toast";
 
 export function AppLayout() {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg-base">
-      <Sidebar />
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Top chrome bar for native window drag */}
-        <div className="h-8 shrink-0 bg-bg-primary" data-tauri-drag-region="" />
-        <div className="flex-1 overflow-y-auto px-8 pb-8">
-          <div className="fade-in">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-base">
+      {/* Drag region */}
+      <div className="h-2 shrink-0" style={{ WebkitAppRegion: "drag" } as React.CSSProperties} />
+      {/* Main */}
+      <div className="flex flex-1 min-h-0">
+        <Sidebar />
+        <main className="flex-1 min-w-0 overflow-y-auto px-8 pb-8 relative" style={{ background: "radial-gradient(ellipse at 30% 0%, rgba(255, 99, 71, 0.04) 0%, transparent 60%), var(--color-bg-base)" }}>
+          <div className="fade-in pt-2">
             <Outlet />
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
+      {/* Status bar */}
+      <StatusBar />
+      {/* Toast overlay */}
+      <Toast />
     </div>
   );
 }

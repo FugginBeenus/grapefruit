@@ -3,3 +3,4 @@ beautifulsoup4>=4.11
 rapidfuzz>=3.0
 music-tag>=0.4
 tinytag>=1.8
+cryptography>=41.0
