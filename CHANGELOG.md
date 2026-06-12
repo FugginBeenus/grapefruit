@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.2.0] - 2026-06-12
+
+### Major: Pivot to Music Sync Manager
+
+Grapefruit refocuses on what makes it unique: keeping homelab services, physical
+players, and streaming accounts in sync with the music library you own. Music
+managers are everywhere; sync managers aren't.
+
+### New: Streaming Gap
+- **Gap report** (new landing page): compare a streaming source against your local
+  library and get the list of songs you're missing
+- **Playlist URL source**: any public Spotify / Apple Music playlist, no login
+- **Full Spotify library source**: official OAuth (PKCE) — Liked Songs + all
+  playlists, deduplicated; tokens encrypted at rest like the Plex token
+- **Copy / Export**: missing list to clipboard, CSV, or plain text — feed it
+  straight to your downloader
+
+### New: Spotify account connection
+- Settings → Spotify Account: bring-your-own (free) developer app Client ID,
+  one-click browser auth on a localhost loopback, status + disconnect
+- Sidecar: `spotify_*` RPC methods, `core/spotify_{config,auth,client}.py`
+
+### Changed
+- Sidebar reorganized sync-first: **Sync** (Streaming Gap, Device Sync, Import),
+  **Manage** (Library, Playlists, Tools, Settings)
+- App identity copy updated from "music manager" to "music sync manager"
+- New `write_text_file` RPC for exports
+
+### Fixed
+- **Release packages couldn't start the Python sidecar at all** (every platform).
+  The sidecar resolver checked a compile-time path (`CARGO_MANIFEST_DIR`) that
+  only exists on the CI runner (e.g. `D:\a\grapefruit\grapefruit`) and bailed
+  before ever looking for the bundled PyInstaller binary — so installed apps
+  couldn't detect iPods or open local folders unless users recreated the CI
+  workspace path by hand. Release builds now prefer the bundled sidecar binary
+  and never consult compile-time paths; dev builds prefer the python/ source.
+- Windows dev: sidecar now tries `python3`, `python`, and `py` interpreters
+  instead of only `python3`.
+
+### CI
+- Linux release target (ubuntu-22.04): `.AppImage` + `.deb` artifacts
+
 ## [2.1.0] - 2026-04-13
 
 ### Major: Pivot to Robust Music Manager

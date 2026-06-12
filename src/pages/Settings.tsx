@@ -1,6 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { usePlexStore } from "../stores/plexStore";
-import type { PlexSection } from "../types/models";
+import { useToastStore } from "../stores/toastStore";
+import {
+  spotifyAuthPoll,
+  spotifyAuthStart,
+  spotifyDisconnect,
+  spotifyGetStatus,
+  spotifySetClientId,
+} from "../api/spotify";
+import type { PlexSection, SpotifyStatus } from "../types/models";
 
 type OrgPattern = "artist-album" | "artist" | "album";
 
@@ -13,6 +22,158 @@ function Field({ label, placeholder, value, onChange, type = "text", hint }: {
       <label className="block text-[12px] font-semibold text-t-secondary mb-1.5">{label}</label>
       <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="input" />
       {hint && <p className="mt-1.5 text-[11px] text-t-muted leading-relaxed">{hint}</p>}
+    </div>
+  );
+}
+
+function SpotifyCard() {
+  const addToast = useToastStore((s) => s.addToast);
+  const [status, setStatus] = useState<SpotifyStatus | null>(null);
+  const [clientId, setClientId] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const refresh = async () => {
+    try {
+      const s = await spotifyGetStatus();
+      setStatus(s);
+      setClientId(s.client_id);
+    } catch {
+      /* sidecar not ready yet */
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    return () => {
+      if (pollTimer.current) clearInterval(pollTimer.current);
+    };
+  }, []);
+
+  const handleConnect = async () => {
+    try {
+      const trimmed = clientId.trim();
+      if (!trimmed) return;
+      await spotifySetClientId(trimmed);
+      const { auth_url } = await spotifyAuthStart();
+      setConnecting(true);
+      await openUrl(auth_url);
+
+      pollTimer.current = setInterval(async () => {
+        try {
+          const poll = await spotifyAuthPoll();
+          if (poll.status === "connected") {
+            if (pollTimer.current) clearInterval(pollTimer.current);
+            setConnecting(false);
+            addToast("success", `Spotify connected${poll.user_name ? ` as ${poll.user_name}` : ""}`);
+            refresh();
+          } else if (poll.status === "error") {
+            if (pollTimer.current) clearInterval(pollTimer.current);
+            setConnecting(false);
+            addToast("error", `Spotify connection failed: ${poll.error}`);
+          }
+        } catch {
+          /* keep polling */
+        }
+      }, 1500);
+    } catch (e) {
+      setConnecting(false);
+      addToast("error", String(e));
+    }
+  };
+
+  const handleDisconnect = async () => {
+    await spotifyDisconnect();
+    addToast("info", "Spotify disconnected");
+    refresh();
+  };
+
+  return (
+    <div className="card p-5 mb-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="icon-box icon-box-md icon-box-emerald">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.871 7.077-.496 9.713 1.115a.623.623 0 01.206.857zm1.223-2.722a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166A.78.78 0 016.32 11.3c3.632-1.102 8.147-.568 11.234 1.328a.78.78 0 01.255 1.074zm.105-2.835c-3.223-1.914-8.54-2.09-11.618-1.156a.935.935 0 11-.543-1.79c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.608z" />
+            </svg>
+          </div>
+          <h2 className="text-sm font-bold text-t">Spotify Account</h2>
+        </div>
+        {status?.connected && (
+          <div className="flex items-center gap-1.5 text-[12px] text-ok font-medium">
+            <div className="w-2 h-2 rounded-full bg-ok" />
+            {status.user_name || "Connected"}
+          </div>
+        )}
+      </div>
+
+      <p className="text-[12px] text-t-muted leading-relaxed mb-4">
+        Connect your Spotify account to analyze your full library — Liked Songs and
+        every playlist — in the Streaming Gap report.
+      </p>
+
+      {status?.connected ? (
+        <button onClick={handleDisconnect} className="btn btn-secondary text-xs">
+          Disconnect
+        </button>
+      ) : (
+        <>
+          <Field
+            label="Client ID"
+            placeholder="Your Spotify app Client ID"
+            value={clientId}
+            onChange={setClientId}
+            hint="From your (free) Spotify Developer app — see setup steps below."
+          />
+          <div className="flex items-center gap-3 mt-4">
+            <button
+              onClick={handleConnect}
+              disabled={!clientId.trim() || connecting}
+              className="btn btn-primary text-xs"
+            >
+              {connecting ? "Waiting for Spotify..." : "Connect Spotify"}
+            </button>
+            {connecting && (
+              <span className="text-[11px] text-t-muted">Approve access in your browser</span>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="mt-4">
+        <button
+          onClick={() => setShowHelp(!showHelp)}
+          className="flex items-center gap-1.5 text-[11px] text-t-muted hover:text-t-secondary transition-colors"
+        >
+          <svg className={`w-3 h-3 transition-transform ${showHelp ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+          One-time setup: create your Spotify app (~2 minutes)
+        </button>
+        {showHelp && (
+          <ol className="text-[12px] text-t-secondary space-y-1.5 list-decimal list-inside leading-relaxed mt-3 pl-1">
+            <li>
+              Go to{" "}
+              <button
+                onClick={() => openUrl("https://developer.spotify.com/dashboard")}
+                className="text-gf hover:text-gf-light transition-colors underline"
+              >
+                developer.spotify.com/dashboard
+              </button>{" "}
+              and log in with your Spotify account
+            </li>
+            <li>Click <strong>Create app</strong> — any name and description</li>
+            <li>
+              Set the Redirect URI to{" "}
+              <code className="bg-bg-surface px-1.5 py-0.5 rounded text-[11px] font-mono text-gf-light">
+                http://127.0.0.1:8721/callback
+              </code>
+            </li>
+            <li>Check <strong>Web API</strong>, save, then copy the <strong>Client ID</strong> here</li>
+          </ol>
+        )}
+      </div>
     </div>
   );
 }
@@ -104,6 +265,9 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* Spotify */}
+      <SpotifyCard />
 
       {/* Plex Server */}
       <div className="card p-5 mb-4">
@@ -202,8 +366,10 @@ export default function Settings() {
           </div>
           <h2 className="text-sm font-bold text-t">About</h2>
         </div>
-        <p className="text-[13px] text-t-secondary font-medium">Grapefruit v2.0.0</p>
-        <p className="text-[12px] text-t-muted mt-1">Music manager for iPod, Rockbox & Plex</p>
+        <p className="text-[13px] text-t-secondary font-medium">Grapefruit v2.2.0</p>
+        <p className="text-[12px] text-t-muted mt-1">
+          Music sync manager — keep streaming, Plex, and your devices in step with the library you own
+        </p>
         <a
           href="https://github.com/FugginBeenus/grapefruit"
           target="_blank"

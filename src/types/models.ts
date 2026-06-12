@@ -73,6 +73,13 @@ export interface MatchResult {
   user_selected: MatchCandidate | null;
 }
 
+export interface SpotifyStatus {
+  configured: boolean;
+  connected: boolean;
+  client_id: string;
+  user_name: string;
+}
+
 export interface PlexConfig {
   server_url: string;
   token: string;

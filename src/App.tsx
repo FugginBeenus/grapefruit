@@ -3,6 +3,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import Library from "./pages/Library";
 import Playlists from "./pages/Playlists";
 import ImportFlow from "./pages/ImportFlow";
+import Gap from "./pages/Gap";
 import Sync from "./pages/Sync";
 import Settings from "./pages/Settings";
 import Tools from "./pages/Tools";
@@ -12,7 +13,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          <Route index element={<Navigate to="/library" replace />} />
+          <Route index element={<Navigate to="/gap" replace />} />
+          <Route path="gap" element={<Gap />} />
           <Route path="library" element={<Library />} />
           <Route path="playlists" element={<Playlists />} />
           <Route path="playlists/:name" element={<Playlists />} />

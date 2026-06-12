@@ -38,6 +38,7 @@ class RpcHandler:
     def __init__(self, notify_fn: Callable[[str, dict], None]):
         self._notify = notify_fn
         self._session = Session()
+        self._spotify_flow = None  # in-flight OAuth flow, if any
 
     def dispatch(self, method: str, params: dict):
         """Route a method name to its handler and return the result."""
@@ -1854,6 +1855,105 @@ class RpcHandler:
             "folders": folders,
             "files": files,
         }
+
+    # ── Spotify (OAuth full-library) ────────────────────────────────
+
+    def _rpc_spotify_get_status(self, params: dict):
+        from core.spotify_config import load_spotify_config
+        config = load_spotify_config()
+        return {
+            "configured": bool(config.client_id),
+            "connected": bool(config.refresh_token),
+            "client_id": config.client_id,
+            "user_name": config.user_name,
+        }
+
+    def _rpc_spotify_set_client_id(self, params: dict):
+        _require(params, "client_id")
+        from core.spotify_config import load_spotify_config, save_spotify_config
+        config = load_spotify_config()
+        new_id = params["client_id"].strip()
+        if config.client_id and new_id != config.client_id:
+            # New app identity invalidates existing tokens
+            config.access_token = ""
+            config.refresh_token = ""
+            config.expires_at = 0.0
+            config.user_name = ""
+            config.user_id = ""
+        config.client_id = new_id
+        save_spotify_config(config)
+        return {"ok": True}
+
+    def _rpc_spotify_auth_start(self, params: dict):
+        from core.spotify_auth import SpotifyAuthFlow
+        from core.spotify_config import load_spotify_config
+
+        config = load_spotify_config()
+        if not config.client_id:
+            raise ValueError("Set your Spotify Client ID first")
+
+        # Cancel any stale flow so the loopback port is free
+        if self._spotify_flow:
+            self._spotify_flow.cancel()
+        self._spotify_flow = SpotifyAuthFlow(config.client_id)
+        auth_url = self._spotify_flow.start()
+        return {"auth_url": auth_url}
+
+    def _rpc_spotify_auth_poll(self, params: dict):
+        flow = self._spotify_flow
+        if not flow:
+            return {"status": "idle"}
+        return {
+            "status": flow.status,
+            "user_name": flow.user_name,
+            "error": flow.error,
+        }
+
+    def _rpc_spotify_disconnect(self, params: dict):
+        from core.spotify_config import load_spotify_config, save_spotify_config
+        if self._spotify_flow:
+            self._spotify_flow.cancel()
+            self._spotify_flow = None
+        config = load_spotify_config()
+        config.access_token = ""
+        config.refresh_token = ""
+        config.expires_at = 0.0
+        config.user_name = ""
+        config.user_id = ""
+        save_spotify_config(config)
+        return {"ok": True}
+
+    def _rpc_spotify_fetch_library(self, params: dict):
+        """Fetch the user's full Spotify library (liked songs + playlists)."""
+        from core.spotify_client import SpotifyClient
+
+        include_playlists = params.get("include_playlists", True)
+        client = SpotifyClient()
+
+        def progress(current, total, label):
+            self._notify("progress", {
+                "op": "spotify_fetch",
+                "current": current,
+                "total": total,
+                "message": label,
+            })
+
+        metadata, tracks = client.fetch_full_library(
+            include_playlists=include_playlists, progress=progress)
+        return {
+            "metadata": _serialize(metadata),
+            "tracks": _serialize(tracks),
+        }
+
+    # ── Export ──────────────────────────────────────────────────────
+
+    def _rpc_write_text_file(self, params: dict):
+        """Write text content to a user-chosen path (export support)."""
+        _require(params, "path", "content")
+        path = Path(params["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(params["content"], encoding="utf-8")
+        return {"ok": True, "path": str(path)}
 
     # ── Helpers ─────────────────────────────────────────────────────
 

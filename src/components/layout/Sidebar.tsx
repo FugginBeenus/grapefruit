@@ -8,18 +8,19 @@ const SAVED_PATH_KEY = "grapefruit:localLibraryPath";
 
 const NAV_ITEMS = [
   {
+    section: "Sync",
+    items: [
+      { to: "/gap", label: "Streaming Gap", icon: IconGap, color: "gf" as const },
+      { to: "/sync", label: "Device Sync", icon: IconSync, color: "emerald" as const },
+      { to: "/import", label: "Import", icon: IconImport, color: "pink" as const },
+    ],
+  },
+  {
     section: "Manage",
     items: [
       { to: "/library", label: "Library", icon: IconLibrary, color: "cyan" as const },
       { to: "/playlists", label: "Playlists", icon: IconPlaylist, color: "violet" as const },
-      { to: "/import", label: "Import", icon: IconImport, color: "pink" as const },
       { to: "/tools", label: "Tools", icon: IconTools, color: "amber" as const },
-    ],
-  },
-  {
-    section: "Sync",
-    items: [
-      { to: "/sync", label: "Sync", icon: IconSync, color: "emerald" as const },
       { to: "/settings", label: "Settings", icon: IconSettings, color: "info" as const },
     ],
   },
@@ -153,7 +154,7 @@ export function Sidebar() {
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-3 space-y-1">
         {NAV_ITEMS.map(({ section, items }, idx) => {
-          const sectionColor = idx === 0 ? "bg-cyan" : "bg-emerald";
+          const sectionColor = idx === 0 ? "bg-gf" : "bg-cyan";
           return (
           <div key={section}>
             {idx > 0 && <div className="border-b border-b-[rgba(255,255,255,0.06)] mx-2 my-3" />}
@@ -304,6 +305,15 @@ function IconImport({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+    </svg>
+  );
+}
+
+function IconGap({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 11.25h3" />
     </svg>
   );
 }
