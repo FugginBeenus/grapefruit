@@ -1,64 +1,67 @@
-# 🍊 Grapefruit
+<p align="center">
+  <img src="grapefruit_logo.png" alt="Grapefruit" width="110">
+</p>
 
-**A music sync manager for people who own their music.**
+# Grapefruit
 
-There are plenty of great music managers out there — but very few tools focused on keeping
-homelab services, physical players, and streaming accounts *in sync*. Grapefruit treats the
-music library you own as the source of truth and keeps everything else in step with it:
+A desktop music sync manager. Grapefruit treats the music library you own as the
+source of truth and keeps everything else lined up with it — streaming services,
+a Plex server, and iPod/Rockbox devices.
+
+There are plenty of good music managers around, but not much focused on the
+syncing side of things: knowing what's in your streaming accounts but missing
+from your library, and pushing your library out to the places you actually
+listen.
 
 ```
-  Spotify / Apple Music  ──┐
-                           │   gap analysis: what am I missing?
-  Your music library  ◄────┤
-        (the hub)          │   one-way sync: library → devices & servers
-                           ▼
-            iPod / Rockbox · Plex · local folders
+  Spotify / Apple Music ──┐
+                          │   gap analysis: what am I missing?
+  your music library ◄────┤
+       (the hub)          │   one-way sync: library → devices and servers
+                          ▼
+          iPod / Rockbox · Plex · local folders
 ```
 
-Built with Tauri (Rust) + React, with a Python engine for scraping, matching, and syncing.
-Runs on **macOS, Windows, and Linux**.
+Built with Tauri (Rust) and React, with a Python engine for scraping, matching,
+and syncing. Runs on macOS, Windows, and Linux.
 
-## Features
+## What it does
 
-### 🔍 Streaming Gap — *what am I missing?*
-Compare your streaming world against the music you actually own:
-- **Playlist URL** — paste any public Spotify or Apple Music playlist link (no login needed)
-- **Full Spotify library** — connect your account once and analyze Liked Songs plus every
-  playlist you follow, deduplicated
-- Fuzzy-matched against your library, with a **"songs to find"** list you can copy to the
-  clipboard or export as CSV / plain text for your downloader of choice
-
-### 🔄 Device Sync
-One-way sync from your library to an iPod (Rockbox or Apple firmware) or any folder.
-Three modes: Selective (add only), Full Mirror, and Delta (changed since last sync).
-
-### 📥 Import
-Turn a streaming playlist URL into a real playlist on your device — fetch, match against
-what's on the device, resolve uncertain matches by hand, save as M3U8.
-
-### 🟠 Plex
-- Push device playlists to your Plex server (filename + metadata matching)
-- Pull metadata *from* Plex onto your files — field-by-field diff, then apply tags and artwork
-
-### 📚 Library management
-Browse and search your device library, edit tags and album art, find duplicates
-(trash-with-undo), health check, and auto-organize into Artist/Album folders.
+- **Streaming Gap** — compare a streaming source against your library and get
+  the list of songs you still need to find. Works with any public Spotify or
+  Apple Music playlist URL (no login), or with your full Spotify library
+  (Liked Songs plus every playlist) once you connect your account. Copy the
+  missing list to the clipboard or export it as CSV / plain text.
+- **Device Sync** — one-way sync from your library to an iPod (Rockbox or
+  Apple firmware) or any folder. Three modes: selective, full mirror, delta.
+- **Import** — turn a playlist URL into a real playlist on your device: fetch,
+  match against what's there, resolve uncertain matches by hand, save as M3U8.
+- **Plex** — push device playlists to your Plex server, or pull Plex metadata
+  (tags and artwork) onto your files, with a field-by-field diff before
+  anything is written.
+- **Library tools** — browse and search, edit tags and album art, find
+  duplicates (trash with undo), health check, auto-organize into
+  Artist/Album folders.
 
 ## Install
 
-Grab the latest installer from [Releases](https://github.com/FugginBeenus/grapefruit/releases):
+Download the latest installer from the
+[Releases page](https://github.com/FugginBeenus/grapefruit/releases):
 `.dmg` (macOS), `.exe` (Windows), `.AppImage` / `.deb` (Linux).
 
-## Connecting Spotify (one-time, ~2 minutes)
+## Connecting Spotify
 
-Full-library analysis uses Spotify's official API with your own free developer app:
+Full-library analysis uses Spotify's official API through your own free
+developer app. One-time setup, about two minutes:
 
-1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and log in
-2. **Create app** — any name, check **Web API**
+1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+   and log in with your Spotify account
+2. Create an app (any name), check **Web API**
 3. Set the Redirect URI to `http://127.0.0.1:8721/callback`
-4. Copy the **Client ID** into Grapefruit → Settings → Spotify Account → **Connect Spotify**
+4. Copy the Client ID into Grapefruit → Settings → Spotify Account → Connect
 
-Tokens are encrypted at rest. Grapefruit only requests read access (library + playlists).
+Grapefruit only asks for read access (library and playlists), and tokens are
+stored encrypted.
 
 ## Finding your Plex token
 
@@ -74,20 +77,20 @@ git clone https://github.com/FugginBeenus/grapefruit.git
 cd grapefruit
 npm install
 pip install -r python/requirements.txt
-npm run tauri dev      # starts frontend + Rust shell + Python sidecar together
+npm run tauri dev      # frontend + Rust shell + Python sidecar together
 ```
 
-### Architecture
+### How it's put together
 
 ```
 src/            React + Tailwind UI (pages, stores, components)
 src-tauri/      Rust shell — window, sidecar lifecycle, JSON-RPC bridge
-python/         Sidecar engine — JSON-RPC over stdio
+python/         sidecar engine — JSON-RPC over stdio
   core/         scrapers, fuzzy matcher, sync engine, Plex & Spotify clients
 ```
 
-The frontend never touches the network or filesystem directly — everything goes through
-`rpcCall()` → Rust → the Python sidecar.
+The frontend never touches the network or filesystem directly — everything goes
+through `rpcCall()` → Rust → the Python sidecar.
 
 ### Release builds
 
@@ -95,8 +98,8 @@ The frontend never touches the network or filesystem directly — everything goe
 npm run tauri build
 ```
 
-Tagged pushes (`v*`) build installers for all three platforms via GitHub Actions
-(`.github/workflows/release.yml`), bundling the sidecar as a PyInstaller binary.
+Pushing a `v*` tag builds installers for all three platforms via GitHub Actions
+(`.github/workflows/release.yml`), with the sidecar compiled by PyInstaller.
 
 ## License
 
