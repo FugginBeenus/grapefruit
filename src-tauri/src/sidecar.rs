@@ -31,44 +31,31 @@ pub async fn spawn_sidecar(
     pending: PendingMap,
     writer: Arc<Mutex<Option<StdinWriter>>>,
 ) -> Result<(), String> {
-    let python_dir = resolve_python_dir()?;
-    let script = python_dir.join("sidecar_main.py");
+    // Two ways to run the sidecar:
+    //   - the compiled (PyInstaller) binary bundled with release packages
+    //   - the python/ source tree, spawned with a system Python interpreter
+    // Release builds must prefer the compiled binary: the python source is
+    // not bundled, and compile-time paths (CARGO_MANIFEST_DIR) point at the
+    // CI runner's workspace, which doesn't exist on user machines.
+    // Dev builds prefer the source so edits take effect without re-packaging.
+    let compiled = resolve_sidecar_binary();
+    let source = resolve_python_source();
 
-    if !script.exists() {
-        return Err(format!(
-            "Python sidecar not found at: {}",
-            script.display()
-        ));
-    }
-
-    // In dev mode (python/ source dir exists), always use python3 directly.
-    // Only use the compiled sidecar binary in production builds where the
-    // python source dir won't exist.
-    let use_compiled = !script.exists() || resolve_sidecar_binary().is_some() && !python_dir.join("core").exists();
-
-    let mut child = if use_compiled {
-        if let Some(sidecar_bin) = resolve_sidecar_binary() {
-            log::info!("Spawning compiled sidecar: {}", sidecar_bin.display());
-            tokio::process::Command::new(&sidecar_bin)
-                .current_dir(sidecar_bin.parent().unwrap_or(&sidecar_bin))
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
-        } else {
-            return Err("No compiled sidecar binary found and python source not available".into());
+    let mut child = match (cfg!(debug_assertions), source, compiled) {
+        // Dev: source first, compiled as fallback
+        (true, Some((dir, script)), _) => spawn_from_source(&dir, &script)?,
+        (true, None, Some(bin)) => spawn_compiled(&bin)?,
+        // Release: compiled first, source as fallback (portable installs)
+        (false, _, Some(bin)) => spawn_compiled(&bin)?,
+        (false, Some((dir, script)), None) => spawn_from_source(&dir, &script)?,
+        _ => {
+            return Err(
+                "Sidecar not found. Looked for a bundled 'grapefruit-sidecar' \
+                 binary next to the app executable, and for python/sidecar_main.py \
+                 next to the executable."
+                    .into(),
+            )
         }
-    } else {
-        log::info!("Spawning Python sidecar from: {}", script.display());
-        tokio::process::Command::new("python3")
-            .arg(script.to_string_lossy().as_ref())
-            .current_dir(&python_dir)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
     };
 
     let stdin = child
@@ -159,30 +146,76 @@ pub async fn spawn_sidecar(
     Ok(())
 }
 
-/// Resolve the python/ directory — works in both dev and bundled mode
-fn resolve_python_dir() -> Result<std::path::PathBuf, String> {
-    // In dev: project_root/python/
-    let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|p| p.join("python"))
-        .unwrap_or_default();
+/// Spawn the compiled (PyInstaller) sidecar binary.
+fn spawn_compiled(sidecar_bin: &std::path::Path) -> Result<tokio::process::Child, String> {
+    log::info!("Spawning compiled sidecar: {}", sidecar_bin.display());
+    tokio::process::Command::new(sidecar_bin)
+        .current_dir(sidecar_bin.parent().unwrap_or(sidecar_bin))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn compiled sidecar: {}", e))
+}
 
-    if dev_path.exists() {
-        return Ok(dev_path);
+/// Spawn the sidecar from python source, trying interpreter names in order
+/// ("python3" is standard on Unix; Windows installs typically expose "python").
+fn spawn_from_source(
+    python_dir: &std::path::Path,
+    script: &std::path::Path,
+) -> Result<tokio::process::Child, String> {
+    log::info!("Spawning Python sidecar from: {}", script.display());
+    let interpreters: &[&str] = if cfg!(target_os = "windows") {
+        &["python3", "python", "py"]
+    } else {
+        &["python3", "python"]
+    };
+
+    let mut last_err = String::new();
+    for interp in interpreters {
+        match tokio::process::Command::new(interp)
+            .arg(script.to_string_lossy().as_ref())
+            .current_dir(python_dir)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => return Ok(child),
+            Err(e) => last_err = format!("{}: {}", interp, e),
+        }
+    }
+    Err(format!("Failed to spawn Python interpreter ({})", last_err))
+}
+
+/// Find the python/ source tree, returning (dir, sidecar_main.py).
+///
+/// The compile-time CARGO_MANIFEST_DIR path is only meaningful on the machine
+/// that built the binary (in CI that's the runner workspace, e.g.
+/// `D:\a\grapefruit\grapefruit`), so it is only consulted in debug builds.
+/// All builds also accept a python/ directory next to the executable, which
+/// supports portable from-source installs.
+fn resolve_python_source() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    #[cfg(debug_assertions)]
+    if let Some(parent) = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
+        candidates.push(parent.join("python"));
     }
 
-    // In production: look next to the app binary
     if let Ok(exe) = std::env::current_exe() {
-        let prod_path = exe.parent().unwrap_or(&exe).join("python");
-        if prod_path.exists() {
-            return Ok(prod_path);
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("python"));
         }
     }
 
-    Err(format!(
-        "Could not find python directory. Tried: {}",
-        dev_path.display()
-    ))
+    for dir in candidates {
+        let script = dir.join("sidecar_main.py");
+        if script.exists() {
+            return Some((dir, script));
+        }
+    }
+    None
 }
 
 /// Resolve sidecar binary path for bundled production builds.
