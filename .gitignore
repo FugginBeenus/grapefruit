@@ -10,3 +10,6 @@ python/core/__pycache__/
 python/build/
 python/dist/
 *.spec.bak
+
+# Claude Code local tooling
+.claude/
