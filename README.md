@@ -43,6 +43,22 @@ and syncing. Runs on macOS, Windows, and Linux.
   duplicates (trash with undo), health check, auto-organize into
   Artist/Album folders.
 
+## Screenshots
+
+**Streaming Gap** — point it at a streaming source and your library, and it
+tells you what you're missing.
+
+![Streaming Gap](assets/screenshots/streaming-gap.png)
+
+**Library** — browse and search everything you own.
+
+![Library](assets/screenshots/library.png)
+
+**Connect Spotify** — a one-time, bring-your-own-app setup for full-library
+analysis.
+
+![Spotify setup](assets/screenshots/spotify-setup.png)
+
 ## Install
 
 Download the latest installer from the
