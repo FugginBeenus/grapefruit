@@ -1974,6 +1974,30 @@ class RpcHandler:
         path.write_text(params["content"], encoding="utf-8")
         return {"ok": True, "path": str(path)}
 
+    # ── Updates ─────────────────────────────────────────────────────
+
+    def _rpc_get_latest_release(self, params: dict):
+        """Fetch the latest GitHub release so the UI can offer an update."""
+        import requests
+        repo = params.get("repo", "FugginBeenus/grapefruit")
+        resp = requests.get(
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "Grapefruit",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            raise ValueError(f"GitHub API returned {resp.status_code}")
+        data = resp.json()
+        return {
+            "tag_name": data.get("tag_name", ""),
+            "name": data.get("name", ""),
+            "html_url": data.get("html_url", ""),
+            "published_at": data.get("published_at", ""),
+        }
+
     # ── Helpers ─────────────────────────────────────────────────────
 
     def _resolve_device_path(self, path_str: str) -> Path:
