@@ -166,9 +166,20 @@ function SpotifyCard() {
             <li>Click <strong>Create app</strong> — any name and description</li>
             <li>
               Set the Redirect URI to{" "}
-              <code className="bg-bg-surface px-1.5 py-0.5 rounded text-[11px] font-mono text-gf-light">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText("http://127.0.0.1:8721/callback");
+                  addToast("success", "Redirect URI copied");
+                }}
+                title="Click to copy"
+                className="inline-flex items-center gap-1 bg-bg-surface px-1.5 py-0.5 rounded text-[11px] font-mono text-gf-light hover:bg-bg-hover transition-colors align-baseline"
+              >
                 http://127.0.0.1:8721/callback
-              </code>
+                <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.16-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
+                </svg>
+              </button>
             </li>
             <li>Check <strong>Web API</strong>, save, then copy the <strong>Client ID</strong> here</li>
           </ol>
@@ -273,8 +284,10 @@ export default function Settings() {
       <div className="card p-5 mb-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="icon-box icon-box-md icon-box-violet">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" /></svg>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#1b1b20", border: "1px solid rgba(229,160,13,0.25)" }}>
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#E5A00D" aria-label="Plex">
+                <path d="M11 3H7l6.5 9L7 21h4l6.5-9z" />
+              </svg>
             </div>
             <h2 className="text-sm font-bold text-t">Plex Server</h2>
           </div>

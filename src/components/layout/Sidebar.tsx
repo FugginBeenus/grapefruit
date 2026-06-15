@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useDeviceStore } from "../../stores/deviceStore";
 import { usePlexStore } from "../../stores/plexStore";
 import { open } from "@tauri-apps/plugin-dialog";
+import logoUrl from "../../assets/grapefruit_logo.png";
 
 const SAVED_PATH_KEY = "grapefruit:localLibraryPath";
 
@@ -76,9 +77,12 @@ export function Sidebar() {
       {/* App logo */}
       <div className="px-4 pb-4">
         <NavLink to="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg, #FF7F66 0%, #E5503A 100%)", boxShadow: "0 4px 16px rgba(255, 99, 71, 0.3), 0 0 24px rgba(255, 99, 71, 0.15)" }}>
-            <span className="text-white text-base font-black drop-shadow-sm">G</span>
-          </div>
+          <img
+            src={logoUrl}
+            alt="Grapefruit"
+            className="w-9 h-9 shrink-0"
+            style={{ filter: "drop-shadow(0 2px 8px rgba(255, 99, 71, 0.35))" }}
+          />
           <span className="text-[16px] font-semibold text-t tracking-tight group-hover:text-gf transition-colors">
             Grapefruit
           </span>
