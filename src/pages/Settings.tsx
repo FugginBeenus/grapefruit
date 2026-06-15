@@ -108,10 +108,21 @@ function SpotifyCard() {
         )}
       </div>
 
-      <p className="text-[12px] text-t-muted leading-relaxed mb-4">
+      <p className="text-[12px] text-t-muted leading-relaxed mb-3">
         Connect your Spotify account to analyze your full library — Liked Songs and
         every playlist — in the Streaming Gap report.
       </p>
+
+      <div className="flex items-start gap-2 mb-4 p-2.5 rounded-lg bg-amber-muted border border-amber/20 text-[11px] text-amber leading-relaxed">
+        <svg className="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+        </svg>
+        <span>
+          As of Feb 2026, Spotify requires a <strong>Premium</strong> account for API
+          access — on a free account, library reads may be blocked. The playlist-URL
+          gap still works without any account.
+        </span>
+      </div>
 
       {status?.connected ? (
         <button onClick={handleDisconnect} className="btn btn-secondary text-xs">

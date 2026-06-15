@@ -51,6 +51,13 @@ class SpotifyClient:
                 # Force refresh on next loop
                 self._config.expires_at = 0
                 continue
+            if resp.status_code == 403:
+                raise SpotifyClientError(
+                    "Spotify denied access (403). As of Feb 2026 the Web API "
+                    "requires a Spotify Premium account — a free account can't "
+                    "read your library. You can still use the playlist-URL gap "
+                    "without an account."
+                )
             if resp.status_code != 200:
                 raise SpotifyClientError(
                     f"Spotify API error {resp.status_code}: {resp.text[:200]}")

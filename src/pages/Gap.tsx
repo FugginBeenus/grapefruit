@@ -178,6 +178,7 @@ function SourcePicker({
   const { tracks } = useDeviceStore();
   const urlValid = url.includes("spotify.com/") || url.includes("music.apple.com/");
   const connected = spotify?.connected ?? false;
+  const [showAppleHelp, setShowAppleHelp] = useState(false);
 
   return (
     <div className="max-w-2xl mx-auto mt-6">
@@ -255,6 +256,27 @@ function SourcePicker({
               Your library is still scanning — hang tight.
             </p>
           )}
+
+          {/* Apple Music whole-library helper (no API/account needed) */}
+          <div className="mt-4 pt-3 border-t border-b-[rgba(255,255,255,0.06)]">
+            <button
+              onClick={() => setShowAppleHelp((v) => !v)}
+              className="flex items-center gap-1.5 text-[11px] text-t-muted hover:text-t-secondary transition-colors"
+            >
+              <svg className={`w-3 h-3 transition-transform ${showAppleHelp ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+              Compare your whole Apple Music library
+            </button>
+            {showAppleHelp && (
+              <ol className="text-[12px] text-t-secondary space-y-1.5 list-decimal list-inside leading-relaxed mt-3 pl-1">
+                <li>In Apple Music, make a new playlist (e.g. &ldquo;My Library&rdquo;).</li>
+                <li>Open your <strong>Songs</strong>, select all (⌘A / Ctrl+A), and add them to it.</li>
+                <li>Right-click the playlist → <strong>Share</strong> → <strong>Copy Link</strong> (make it public if asked).</li>
+                <li>Paste that link above and run the report.</li>
+              </ol>
+            )}
+          </div>
         </div>
       )}
 

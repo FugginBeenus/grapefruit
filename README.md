@@ -32,6 +32,10 @@ and syncing. Runs on macOS, Windows, and Linux.
   Apple Music playlist URL (no login), or with your full Spotify library
   (Liked Songs plus every playlist) once you connect your account. Copy the
   missing list to the clipboard or export it as CSV / plain text.
+  - *Whole Apple Music library:* make a playlist of all your songs, share it
+    (public link), and paste that — no account or API needed.
+  - *Note:* Spotify's API now requires a **Premium** account (changed Feb 2026);
+    the playlist-URL gap works on any account.
 - **Device Sync** — one-way sync from your library to an iPod (Rockbox or
   Apple firmware) or any folder. Three modes: selective, full mirror, delta.
 - **Import** — turn a playlist URL into a real playlist on your device: fetch,
@@ -66,6 +70,11 @@ Download the latest installer from the
 `.dmg` (macOS), `.exe` (Windows), `.AppImage` / `.deb` (Linux).
 
 ## Connecting Spotify
+
+> **Heads up:** as of February 2026 Spotify's API requires a **Premium**
+> account. On a free account, library reads may be blocked — but the
+> playlist-URL gap (including the Apple Music whole-library trick above) works
+> on any account, no login required.
 
 Full-library analysis uses Spotify's official API through your own free
 developer app. One-time setup, about two minutes:
