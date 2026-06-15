@@ -230,6 +230,16 @@ html, body, #root {
    rule, declared after `.input`, wins and clears the icon. */
 .input-with-icon { padding-left: 2.25rem; }
 
+/* Indeterminate progress: a pill that sweeps across the track. */
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+.progress-indeterminate {
+  width: 35%;
+  animation: progress-indeterminate 1.1s ease-in-out infinite;
+}
+
 /* ── Card ────────────────────────────────────── */
 
 .card {

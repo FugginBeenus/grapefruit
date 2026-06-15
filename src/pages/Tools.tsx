@@ -58,13 +58,15 @@ function HealthCheckTab() {
         </button>
       </div>
 
-      {scanning && progress.total > 0 && (
+      {scanning && (progress.total > 0 ? (
         <ProgressBar
           percent={progress.percent}
           label={progress.message || "Checking..."}
           sublabel={`${progress.current} / ${progress.total}`}
         />
-      )}
+      ) : (
+        <ProgressBar indeterminate label="Scanning library..." />
+      ))}
 
       {result && (
         <>
@@ -228,6 +230,8 @@ function DuplicatesTab() {
         </button>
       </div>
 
+      {scanning && <ProgressBar indeterminate label="Scanning for duplicates..." />}
+
       {msg && (
         <div className="p-3 rounded-xl bg-ok-muted border border-ok/20 text-[13px] text-ok">{msg}</div>
       )}
@@ -295,6 +299,7 @@ function OrganizeTab() {
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const organizeProgress = useProgress("auto_organize");
 
   const preview = useCallback(async () => {
     setRunning(true);
@@ -369,6 +374,16 @@ function OrganizeTab() {
           </button>
         )}
       </div>
+
+      {running && (organizeProgress.total > 0 ? (
+        <ProgressBar
+          percent={organizeProgress.percent}
+          label="Organizing files..."
+          sublabel={`${organizeProgress.current} / ${organizeProgress.total}`}
+        />
+      ) : (
+        <ProgressBar indeterminate label={dryResult ? "Organizing files..." : "Analyzing library..."} />
+      ))}
 
       {done && dryResult && (
         <div className="card p-5 border-emerald/20 bg-emerald-muted">

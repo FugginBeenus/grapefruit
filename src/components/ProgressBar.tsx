@@ -1,10 +1,12 @@
 interface ProgressBarProps {
-  percent: number;
+  percent?: number;
   label?: string;
   sublabel?: string;
+  /** Show a looping animation instead of a measured fill (for ops with no count). */
+  indeterminate?: boolean;
 }
 
-export function ProgressBar({ percent, label, sublabel }: ProgressBarProps) {
+export function ProgressBar({ percent = 0, label, sublabel, indeterminate = false }: ProgressBarProps) {
   return (
     <div className="w-full">
       {(label || sublabel) && (
@@ -14,10 +16,14 @@ export function ProgressBar({ percent, label, sublabel }: ProgressBarProps) {
         </div>
       )}
       <div className="w-full h-2 bg-bg-surface rounded-full overflow-hidden">
-        <div
-          className="h-full bg-gf rounded-full transition-all duration-300 ease-out"
-          style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
-        />
+        {indeterminate ? (
+          <div className="h-full bg-gf rounded-full progress-indeterminate" />
+        ) : (
+          <div
+            className="h-full bg-gf rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+          />
+        )}
       </div>
     </div>
   );
