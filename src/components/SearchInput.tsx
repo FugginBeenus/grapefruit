@@ -18,7 +18,7 @@ export function SearchInput({ value, onChange, placeholder = "Search..." }: Sear
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="input pl-10 pr-8 py-2 text-[13px]"
+        className="input input-with-icon pr-8 py-2 text-[13px]"
       />
       {value && (
         <button

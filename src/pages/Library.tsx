@@ -329,7 +329,7 @@ export default function Library() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
           <input
-            className="input pl-9 py-2 text-sm"
+            className="input input-with-icon py-2 text-sm"
             placeholder="Search tracks..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}

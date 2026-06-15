@@ -225,6 +225,11 @@ html, body, #root {
   box-shadow: 0 0 0 3px var(--color-gf-glow);
 }
 
+/* Left padding for inputs with a leading icon. `.input` is un-layered, so a
+   Tailwind `pl-*` utility (in @layer utilities) loses to it — this un-layered
+   rule, declared after `.input`, wins and clears the icon. */
+.input-with-icon { padding-left: 2.25rem; }
+
 /* ── Card ────────────────────────────────────── */
 
 .card {
