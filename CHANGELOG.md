@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.1] - 2026-06-13
+
+### Fixed
+- **Matching was completely broken** (Streaming Gap, Spotify analyze, and
+  Import). `match_tracks` constructed the `Matcher` with the wrong signature
+  (`Matcher()` instead of `Matcher(local_tracks)`) and never populated the
+  normalized title/artist fields the matcher indexes on. The first surfaced as
+  a crash (`Matcher.__init__() missing 1 required positional argument`); the
+  second would have silently returned every track as "missing". Both fixed,
+  with a clear error when no library is loaded.
+- **Match results serialized wrong.** Enum statuses went over the wire as
+  `"MatchStatus.MATCHED"` instead of `"matched"`, so the UI's filters never
+  matched — the gap report would have shown nothing as missing. `_serialize`
+  now emits enum `.value`.
+- **Intel Macs couldn't start the sidecar.** The x86_64 `.dmg` shipped an
+  arm64 sidecar binary (PyInstaller built on GitHub's now-arm64 `macos-latest`
+  runner and can't cross-compile), so it failed to launch on Intel Macs —
+  no device detection, errors browsing local folders. The x86_64 sidecar now
+  builds on the `macos-15-intel` runner, and a CI step asserts each sidecar's
+  architecture matches its target.
+
 ## [2.2.0] - 2026-06-12
 
 ### Major: Pivot to Music Sync Manager
