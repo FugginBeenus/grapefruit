@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.2.3] - 2026-06-15
+
+### Added
+- **Update-available banner** — checks GitHub for a newer release on launch
+  and shows a dismissible download prompt.
+- **Master library path** in Settings — a dedicated source-of-truth music
+  folder, separate from the Plex server path; Device Sync defaults to it.
+- **Interactive Sync Plan** — click the To Copy / To Remove tiles to review the
+  exact files that will change before syncing.
+- **Apple Music whole-library gap** — guide to compare your entire Apple Music
+  library by sharing it as a public playlist (no API or paid account).
+- Progress indicators (including an indeterminate mode) for the health check,
+  duplicate finder, and auto-organize.
+
+### Changed
+- App logo in the sidebar (replacing the "G"), a Plex mark in the Plex settings
+  card, and a click-to-copy Spotify redirect URI.
+- Warn that Spotify's API now requires Premium (Feb 2026), with a clearer 403.
+
+### Fixed
+- Search icon no longer overlaps the placeholder in the Library/Playlists
+  search fields.
+- Local-library storage gauge is proportional to the library's footprint
+  instead of the whole disk's usage.
+- macOS: bundle Info.plist usage descriptions (Local Network, Removable
+  Volumes, Desktop/Documents/Downloads) so permission prompts appear with
+  clear reasons instead of access silently failing; surface actionable errors
+  when a Plex connection or file access is blocked.
+
 ## [2.2.2] - 2026-06-15
 
 ### Fixed
