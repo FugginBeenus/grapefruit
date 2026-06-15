@@ -29,7 +29,7 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const navigate = useNavigate();
-  const { selectedDevice, playlists, scanning, scanForDevices, connectLocalLibrary, disconnect, error } = useDeviceStore();
+  const { selectedDevice, tracks, playlists, scanning, scanForDevices, connectLocalLibrary, disconnect, error } = useDeviceStore();
   const plexConfig = usePlexStore((s) => s.config);
   const loadPlexConfig = usePlexStore((s) => s.loadConfig);
   const [folderError, setFolderError] = useState<string | null>(null);
@@ -68,6 +68,7 @@ export function Sidebar() {
   };
 
   const isLocal = selectedDevice?.firmware === "local";
+  const libraryBytes = tracks.reduce((s, t) => s + (t.file_size || 0), 0);
 
   return (
     <aside className="flex flex-col w-[240px] min-w-[240px] border-r border-b h-full select-none" style={{ background: "linear-gradient(180deg, #12121A 0%, #0B0B10 100%)" }}>
@@ -113,7 +114,13 @@ export function Sidebar() {
                 </svg>
               </button>
             </div>
-            <StorageIndicator used={selectedDevice.used_bytes} total={selectedDevice.capacity_bytes} />
+            <StorageIndicator
+              used={selectedDevice.used_bytes}
+              total={selectedDevice.capacity_bytes}
+              free={selectedDevice.free_bytes}
+              libraryBytes={libraryBytes}
+              isLocal={isLocal}
+            />
             <DeviceFormatBreakdown />
           </div>
         ) : (
@@ -242,13 +249,21 @@ export function Sidebar() {
 
 /* ── Storage indicator ─────────────────────── */
 
-function StorageIndicator({ used, total }: { used: number; total: number }) {
-  const pct = total > 0 ? (used / total) * 100 : 0;
-  const free = total - used;
+function StorageIndicator({ used, total, free, libraryBytes, isLocal }: {
+  used: number; total: number; free: number; libraryBytes: number; isLocal: boolean;
+}) {
   const fmt = (b: number) => {
     const gb = b / 1024 ** 3;
     return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(b / 1024 ** 2).toFixed(0)} MB`;
   };
+
+  // A local library lives on a shared volume, so the volume's used% reflects
+  // the whole disk (often nearly full) — not the music library. Base the bar
+  // on the library's footprint vs the space available to it instead, which is
+  // proportional and meaningful regardless of volume size.
+  const numer = isLocal ? libraryBytes : used;
+  const denom = isLocal ? libraryBytes + free : total;
+  const pct = denom > 0 ? Math.min(100, (numer / denom) * 100) : 0;
 
   return (
     <div>
@@ -264,7 +279,9 @@ function StorageIndicator({ used, total }: { used: number; total: number }) {
         />
       </div>
       <p className="text-[10px] text-t-muted mt-1">
-        {fmt(free)} free of {fmt(total)}
+        {isLocal
+          ? `${fmt(libraryBytes)} library · ${fmt(free)} free`
+          : `${fmt(free)} free of ${fmt(total)}`}
       </p>
     </div>
   );

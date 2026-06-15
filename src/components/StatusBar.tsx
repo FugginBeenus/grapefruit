@@ -24,10 +24,14 @@ export function StatusBar() {
   const totalDuration = tracks.reduce((sum, t) => sum + (t.duration_seconds ?? 0), 0);
   const totalSize = tracks.reduce((sum, t) => sum + (t.file_size ?? 0), 0);
 
-  const usagePct =
-    selectedDevice && selectedDevice.capacity_bytes > 0
-      ? (selectedDevice.used_bytes / selectedDevice.capacity_bytes) * 100
-      : 0;
+  const isLocal = selectedDevice?.firmware === "local";
+  // For a local library, gauge the library's footprint against the room it has
+  // to grow — not the whole volume's usage (which reflects the entire disk).
+  const usageNumer = isLocal ? totalSize : selectedDevice?.used_bytes ?? 0;
+  const usageDenom = isLocal
+    ? totalSize + (selectedDevice?.free_bytes ?? 0)
+    : selectedDevice?.capacity_bytes ?? 0;
+  const usagePct = usageDenom > 0 ? (usageNumer / usageDenom) * 100 : 0;
 
   return (
     <div className="h-9 shrink-0 flex items-center justify-between px-4 border-t text-[12px] select-none" style={{ background: "linear-gradient(90deg, #0F0F15 0%, #0B0B10 100%)" }}>
@@ -54,7 +58,9 @@ export function StatusBar() {
             <span className="dot dot-ok" />
             <span className="text-t-secondary">{selectedDevice.label || "Device"}</span>
             <span className={usagePct > 90 ? "text-err" : ""}>
-              {formatSize(selectedDevice.used_bytes)} / {formatSize(selectedDevice.capacity_bytes)}
+              {isLocal
+                ? `${formatSize(totalSize)} library · ${formatSize(selectedDevice.free_bytes)} free`
+                : `${formatSize(selectedDevice.used_bytes)} / ${formatSize(selectedDevice.capacity_bytes)}`}
             </span>
           </>
         ) : (
