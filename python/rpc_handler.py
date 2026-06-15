@@ -4,6 +4,7 @@ import dataclasses
 import os
 import shutil
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Callable
 
@@ -11,9 +12,13 @@ from session import Session
 
 
 def _serialize(obj):
-    """Recursively convert dataclasses and Paths to JSON-safe dicts/strings."""
+    """Recursively convert dataclasses, enums, and Paths to JSON-safe values."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return {k: _serialize(v) for k, v in dataclasses.asdict(obj).items()}
+    if isinstance(obj, Enum):
+        # Emit the .value (e.g. "matched"), not "MatchStatus.MATCHED" — the
+        # frontend matches on the string values.
+        return obj.value
     if isinstance(obj, Path):
         return str(obj)
     if isinstance(obj, list):
@@ -250,12 +255,18 @@ class RpcHandler:
     def _rpc_match_tracks(self, params: dict):
         """Match playlist tracks against device library."""
         from core.matcher import Matcher
-        from core.models import PlaylistTrack
-        from core.local_scanner import LocalTrack
+        from core.models import PlaylistTrack, LocalTrack
+        from core.utils import normalize_for_matching
 
         playlist_tracks_raw = params.get("playlist_tracks", [])
         if not playlist_tracks_raw:
             raise ValueError("No playlist tracks provided")
+
+        if not self._session.device_tracks:
+            raise ValueError(
+                "No library loaded — connect a folder or device and let it "
+                "finish scanning before matching."
+            )
 
         playlist_tracks = [
             PlaylistTrack(
@@ -268,6 +279,8 @@ class RpcHandler:
             for i, t in enumerate(playlist_tracks_raw)
         ]
 
+        # The Matcher indexes local tracks by their *normalized* fields, so
+        # those must be populated here — DeviceTrack doesn't carry them.
         local_tracks = []
         for dt in self._session.device_tracks:
             lt = LocalTrack(
@@ -277,6 +290,8 @@ class RpcHandler:
                 album=dt.album,
                 duration_seconds=dt.duration_seconds,
                 track_number=dt.track_number,
+                normalized_title=normalize_for_matching(dt.title),
+                normalized_artist=normalize_for_matching(dt.artist),
             )
             local_tracks.append(lt)
 
@@ -287,11 +302,8 @@ class RpcHandler:
                 "total": total,
             })
 
-        matcher = Matcher()
-        results = matcher.match_all(
-            playlist_tracks, local_tracks,
-            progress_callback=progress,
-        )
+        matcher = Matcher(local_tracks)
+        results = matcher.match_all(playlist_tracks, progress_callback=progress)
         with self._session._lock:
             self._session.match_results = results
         return _serialize(results)
