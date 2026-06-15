@@ -17,10 +17,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          # PyInstaller does NOT cross-compile — the sidecar binary takes the
+          # architecture of the runner it's built on. Each macOS arch must use
+          # a runner of that arch, or Intel Macs get an arm64 sidecar that
+          # can't launch (and vice versa). macos-15-intel is GitHub's last
+          # x86_64 image (supported through Aug 2027).
+          - platform: macos-15
             rust_target: aarch64-apple-darwin
             sidecar_name: grapefruit-sidecar-aarch64-apple-darwin
-          - platform: macos-latest
+          - platform: macos-15-intel
             rust_target: x86_64-apple-darwin
             sidecar_name: grapefruit-sidecar-x86_64-apple-darwin
           - platform: windows-latest
@@ -85,6 +90,20 @@ jobs:
           else
             mv grapefruit-sidecar "${{ matrix.sidecar_name }}"
             chmod +x "${{ matrix.sidecar_name }}"
+          fi
+        shell: bash
+
+      - name: Verify sidecar architecture (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd src-tauri/binaries
+          expected=$(echo "${{ matrix.rust_target }}" | cut -d- -f1)
+          [ "$expected" = "aarch64" ] && expected="arm64"
+          got=$(lipo -archs "${{ matrix.sidecar_name }}")
+          echo "sidecar arch: '$got' (expected '$expected')"
+          if [ "$got" != "$expected" ]; then
+            echo "::error::Sidecar arch '$got' does not match target '$expected' — Intel/ARM mismatch would ship a sidecar that cannot launch."
+            exit 1
           fi
         shell: bash
 
