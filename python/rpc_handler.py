@@ -225,7 +225,14 @@ class RpcHandler:
 
         from core.utils import detect_playlist_source
 
-        source = detect_playlist_source(url)
+        # detect_playlist_source returns (source_type, url) or None.
+        detected = detect_playlist_source(url)
+        if detected is None:
+            raise ValueError(
+                "Unrecognized URL. Paste a public Spotify or Apple Music "
+                "playlist link."
+            )
+        source_type, _ = detected
 
         def progress(current, total):
             self._notify("progress", {
@@ -234,11 +241,11 @@ class RpcHandler:
                 "total": total,
             })
 
-        if source == "apple_music":
+        if source_type == "apple_music":
             from core.apple_music_scraper import AppleMusicScraper
             scraper = AppleMusicScraper()
             metadata, tracks = scraper.fetch_playlist(url, progress_callback=progress)
-        elif source == "spotify":
+        elif source_type == "spotify":
             from core.spotify_scraper import SpotifyScraper
             scraper = SpotifyScraper()
             metadata, tracks = scraper.fetch_playlist(url, progress_callback=progress)
