@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { open as openDir } from "@tauri-apps/plugin-dialog";
 import { usePlexStore } from "../stores/plexStore";
 import { useToastStore } from "../stores/toastStore";
+import { getAppConfig, setAppConfig } from "../api/appConfig";
 import {
   spotifyAuthPoll,
   spotifyAuthStart,
@@ -211,6 +213,7 @@ export default function Settings() {
   const [musicPath, setMusicPath] = useState("");
   const [saved, setSaved] = useState(false);
   const [showTokenHelp, setShowTokenHelp] = useState(false);
+  const [masterLibPath, setMasterLibPath] = useState("");
 
   // Library settings (localStorage only)
   const [orgPattern, setOrgPattern] = useState<OrgPattern>(
@@ -221,6 +224,15 @@ export default function Settings() {
   );
 
   useEffect(() => { loadConfig(); }, [loadConfig]);
+
+  useEffect(() => {
+    getAppConfig().then((c) => setMasterLibPath(c.master_library_path)).catch(() => {});
+  }, []);
+
+  const persistMasterLib = async (p: string) => {
+    setMasterLibPath(p);
+    try { await setAppConfig({ master_library_path: p }); } catch { /* sidecar not ready */ }
+  };
 
   useEffect(() => {
     if (config) {
@@ -260,6 +272,29 @@ export default function Settings() {
           <h2 className="text-sm font-bold text-t">Library</h2>
         </div>
         <div className="space-y-4">
+          <div>
+            <label className="block text-[12px] font-semibold text-t-secondary mb-1.5">Master library path</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={masterLibPath}
+                onChange={(e) => setMasterLibPath(e.target.value)}
+                onBlur={() => persistMasterLib(masterLibPath)}
+                placeholder="/Users/you/Music"
+                className="input flex-1"
+              />
+              <button
+                onClick={async () => {
+                  const sel = await openDir({ directory: true, multiple: false, title: "Select master library folder", defaultPath: masterLibPath || undefined });
+                  if (sel) persistMasterLib(typeof sel === "string" ? sel : String(sel));
+                }}
+                className="btn btn-secondary shrink-0"
+              >
+                Browse
+              </button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-t-muted">The source-of-truth music folder for Device Sync. Can differ from your Plex server's library path.</p>
+          </div>
           <div>
             <label className="block text-[12px] font-semibold text-t-secondary mb-1.5">Auto-organize pattern</label>
             <select

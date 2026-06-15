@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useDeviceStore } from "../stores/deviceStore";
 import { usePlexStore } from "../stores/plexStore";
 import { rpcCall } from "../api/sidecar";
+import { getAppConfig } from "../api/appConfig";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ProgressBar } from "../components/ProgressBar";
 import { useProgress } from "../hooks/useProgress";
@@ -14,12 +15,48 @@ const fmt = (b: number) => {
   return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(b / 1024 ** 2).toFixed(1)} MB`;
 };
 
+// Show the last couple of path segments for a readable, compact file label.
+const shortPath = (p: string) => {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts.slice(-2).join("/") || p;
+};
+
 type Tab = "device" | "plex";
 type SyncMode = "selective" | "full" | "delta";
 
 /* ------------------------------------------------------------------ */
 /*  Device Sync Tab                                                    */
 /* ------------------------------------------------------------------ */
+
+function PlanFileList({ title, paths, dotClass }: { title: string; paths: string[]; dotClass: string }) {
+  const CAP = 500;
+  return (
+    <div className="mt-3">
+      <p className="text-[10px] font-bold tracking-wide text-t-muted uppercase mb-2">
+        {title} ({paths.length.toLocaleString()})
+      </p>
+      <div className="max-h-56 overflow-y-auto rounded-lg bg-bg-primary border">
+        {paths.length === 0 ? (
+          <p className="text-[11px] text-t-muted text-center py-3">None</p>
+        ) : (
+          <>
+            {paths.slice(0, CAP).map((p, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-1.5 border-b border-b-[rgba(255,255,255,0.04)] last:border-0">
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
+                <span className="text-[11px] text-t-secondary truncate" title={p}>{shortPath(p)}</span>
+              </div>
+            ))}
+            {paths.length > CAP && (
+              <p className="text-[11px] text-t-muted text-center py-2">
+                +{(paths.length - CAP).toLocaleString()} more
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function DeviceSyncTab() {
   const { refreshLibrary } = useDeviceStore();
@@ -29,6 +66,8 @@ function DeviceSyncTab() {
   const [folder, setFolder] = useState("");
   const [mode, setMode] = useState<SyncMode>("selective");
   const [plan, setPlan] = useState<SyncPlan | null>(null);
+  const [showCopyList, setShowCopyList] = useState(false);
+  const [showDeleteList, setShowDeleteList] = useState(false);
   const [computing, setComputing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [done, setDone] = useState(false);
@@ -47,12 +86,18 @@ function DeviceSyncTab() {
   const metaDiffProgress = useProgress("plex_metadata_diff");
   const metaPullProgress = useProgress("plex_pull_metadata");
 
-  // Default folder to music_library_path from Settings
+  // Default the master folder to the dedicated master-library path, falling
+  // back to the Plex library path. Never overrides a folder the user typed.
   useEffect(() => { loadPlexConfig(); }, [loadPlexConfig]);
   useEffect(() => {
-    if (!folder && plexConfig?.music_library_path) {
-      setFolder(plexConfig.music_library_path);
-    }
+    (async () => {
+      const cfg = await getAppConfig().catch(() => null);
+      if (cfg?.master_library_path) {
+        setFolder((f) => f || cfg.master_library_path);
+      } else if (plexConfig?.music_library_path) {
+        setFolder((f) => f || plexConfig.music_library_path);
+      }
+    })();
   }, [plexConfig?.music_library_path]);
 
   const checkMetadata = useCallback(async () => {
@@ -92,6 +137,8 @@ function DeviceSyncTab() {
     setComputing(true);
     setError(null);
     setPlan(null);
+    setShowCopyList(false);
+    setShowDeleteList(false);
     setDone(false);
     setSyncResult(null);
     try {
@@ -198,25 +245,42 @@ function DeviceSyncTab() {
       {/* Plan results */}
       {plan && !done && (
         <div className="card p-5">
-          <h3 className="text-sm font-semibold text-t mb-4">Sync Plan</h3>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="bg-bg-primary rounded-lg p-4 text-center">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-t">Sync Plan</h3>
+            {(plan.files_to_copy > 0 || plan.files_to_delete > 0) && (
+              <span className="text-[11px] text-t-muted">Click a tile to review the files</span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <button
+              onClick={() => { if (plan.files_to_copy > 0) { setShowCopyList((v) => !v); setShowDeleteList(false); } }}
+              disabled={plan.files_to_copy === 0}
+              className={`bg-bg-primary rounded-lg p-4 text-center transition-all ${plan.files_to_copy > 0 ? "hover:bg-bg-hover cursor-pointer" : "cursor-default opacity-80"} ${showCopyList ? "ring-1 ring-ok/50" : ""}`}
+            >
               <p className="text-2xl font-bold text-ok tabular-nums">{plan.files_to_copy}</p>
               <p className="text-[11px] text-t-muted mt-1">To Copy</p>
               <p className="text-[10px] text-t-muted">{fmt(plan.total_copy_bytes)}</p>
-            </div>
-            <div className="bg-bg-primary rounded-lg p-4 text-center">
+            </button>
+            <button
+              onClick={() => { if (plan.files_to_delete > 0) { setShowDeleteList((v) => !v); setShowCopyList(false); } }}
+              disabled={plan.files_to_delete === 0}
+              className={`bg-bg-primary rounded-lg p-4 text-center transition-all ${plan.files_to_delete > 0 ? "hover:bg-bg-hover cursor-pointer" : "cursor-default opacity-80"} ${showDeleteList ? "ring-1 ring-err/50" : ""}`}
+            >
               <p className="text-2xl font-bold text-err tabular-nums">{plan.files_to_delete}</p>
               <p className="text-[11px] text-t-muted mt-1">To Remove</p>
               <p className="text-[10px] text-t-muted">{fmt(plan.total_delete_bytes)}</p>
-            </div>
+            </button>
             <div className="bg-bg-primary rounded-lg p-4 text-center">
               <p className="text-2xl font-bold text-t-muted tabular-nums">{plan.files_unchanged}</p>
               <p className="text-[11px] text-t-muted mt-1">Unchanged</p>
             </div>
           </div>
+
+          {showCopyList && <PlanFileList title="Files to copy" paths={plan._copy_paths} dotClass="bg-ok" />}
+          {showDeleteList && <PlanFileList title="Files to remove" paths={plan._delete_paths} dotClass="bg-err" />}
+
           {!plan.fits_on_device && (
-            <div className="p-3 rounded-lg bg-err-muted border border-err/20 text-[12px] text-err mb-4">
+            <div className="p-3 rounded-lg bg-err-muted border border-err/20 text-[12px] text-err mt-4">
               Not enough space. Need {fmt(plan.shortfall_bytes)} more free.
             </div>
           )}

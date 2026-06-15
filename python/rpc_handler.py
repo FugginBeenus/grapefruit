@@ -1974,6 +1974,20 @@ class RpcHandler:
         path.write_text(params["content"], encoding="utf-8")
         return {"ok": True, "path": str(path)}
 
+    # ── App config ──────────────────────────────────────────────────
+
+    def _rpc_get_app_config(self, params: dict):
+        from core.app_config import load_app_config
+        return _serialize(load_app_config())
+
+    def _rpc_set_app_config(self, params: dict):
+        from core.app_config import load_app_config, save_app_config
+        config = load_app_config()
+        if "master_library_path" in params:
+            config.master_library_path = params["master_library_path"] or ""
+        save_app_config(config)
+        return {"ok": True}
+
     # ── Updates ─────────────────────────────────────────────────────
 
     def _rpc_get_latest_release(self, params: dict):
