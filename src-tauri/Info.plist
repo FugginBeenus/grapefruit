@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Shown when Grapefruit first reaches your Plex server (or any LAN device). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Grapefruit connects to your Plex Media Server on your local network to browse libraries and sync playlists.</string>
+
+	<!-- Shown when Grapefruit first reads an iPod / USB drive under /Volumes. -->
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Grapefruit reads and writes music and playlists on your connected iPod or USB device.</string>
+
+	<!-- Shown if your music library lives in one of these protected folders. -->
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Grapefruit reads the music files you point it at on your Desktop.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Grapefruit reads the music files you point it at in your Documents folder.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Grapefruit reads the music files you point it at in your Downloads folder.</string>
+</dict>
+</plist>

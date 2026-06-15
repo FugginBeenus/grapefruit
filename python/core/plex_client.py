@@ -50,6 +50,13 @@ class PlexClient:
                 "version": info.get("version", ""),
                 "machineIdentifier": self._machine_id,
             }
+        except (requests.ConnectionError, requests.Timeout) as e:
+            raise PlexConnectionError(
+                f"Couldn't reach Plex at {self._base}. Check the server URL and "
+                "that it's running. If macOS prompted to let Grapefruit find "
+                "devices on your local network, allow it (System Settings → "
+                "Privacy & Security → Local Network)."
+            ) from e
         except Exception as e:
             raise PlexConnectionError(f"Cannot connect to Plex: {e}") from e
 

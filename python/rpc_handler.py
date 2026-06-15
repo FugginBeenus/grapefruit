@@ -52,7 +52,15 @@ class RpcHandler:
             raise ValueError(f"Unknown method: {method}")
         if not isinstance(params, dict):
             raise ValueError("Parameters must be a JSON object")
-        return handler(params)
+        try:
+            return handler(params)
+        except PermissionError as e:
+            # Turn a raw TCC/permission denial into an actionable message.
+            raise ValueError(
+                "macOS is blocking file access. Grant Grapefruit permission in "
+                "System Settings → Privacy & Security → Files and Folders "
+                "(enable 'Removable Volumes' for an iPod), then try again."
+            ) from e
 
     # ── Device ──────────────────────────────────────────────────────
 
