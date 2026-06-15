@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "grapefruit"
-version = "2.2.1"
+version = "2.2.2"
 dependencies = [
  "log",
  "serde",

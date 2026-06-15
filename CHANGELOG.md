@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.2.2] - 2026-06-15
+
+### Fixed
+- **Playlist-URL gap reports and Import were broken** — every URL returned
+  "Unsupported playlist source". `detect_playlist_source` returns a
+  `(type, url)` tuple, but the fetch handler compared it to a bare string, so
+  no source ever matched. Now routes on the detected type, with a clearer
+  error for genuinely unrecognized links. (Same root cause class as the 2.2.1
+  match fix: the sidecar handler was written against a slightly different core
+  API and only became reachable once the sidecar started running in 2.2.)
+
+### Docs
+- README: added feature screenshots (Streaming Gap, Library, Spotify setup).
+
 ## [2.2.1] - 2026-06-13
 
 ### Fixed
