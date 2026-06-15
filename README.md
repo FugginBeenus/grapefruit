@@ -69,6 +69,16 @@ Download the latest installer from the
 [Releases page](https://github.com/FugginBeenus/grapefruit/releases):
 `.dmg` (macOS), `.exe` (Windows), `.AppImage` / `.deb` (Linux).
 
+Grapefruit isn't code-signed/notarized yet, so the OS warns on first launch:
+
+- **macOS — "Grapefruit is damaged and can't be opened":** it isn't damaged —
+  macOS quarantines un-notarized apps. Remove the flag once, then open normally:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Grapefruit.app
+  ```
+  (adjust the path if you installed it elsewhere).
+- **Windows — "Windows protected your PC":** click **More info → Run anyway**.
+
 ## Connecting Spotify
 
 > **Heads up:** as of February 2026 Spotify's API requires a **Premium**
