@@ -3,11 +3,15 @@ import type {
   PlaylistMetadata,
   PlaylistTrack,
   MatchResult,
+  MatchCandidate,
+  MatchStatus,
 } from "../types/models";
 import { fetchPlaylist } from "../api/scraper";
 import { rpcCall } from "../api/sidecar";
 
 type ImportStep = "url" | "fetching" | "matching" | "results" | "saving" | "done";
+
+const SAVEABLE: MatchStatus[] = ["matched", "confirmed", "manual", "uncertain"];
 
 interface ImportState {
   step: ImportStep;
@@ -16,6 +20,7 @@ interface ImportState {
   sourceTracks: PlaylistTrack[];
   matchResults: MatchResult[];
   savedPath: string | null;
+  savedCount: number;
   error: string | null;
   loading: boolean;
 
@@ -23,6 +28,8 @@ interface ImportState {
   fetchFromUrl: (url: string) => Promise<void>;
   matchTracks: () => Promise<void>;
   savePlaylist: (name: string) => Promise<void>;
+  resolveMatch: (index: number, candidate: MatchCandidate) => void;
+  rejectMatch: (index: number) => void;
   reset: () => void;
 }
 
@@ -33,6 +40,7 @@ export const useImportStore = create<ImportState>((set, get) => ({
   sourceTracks: [],
   matchResults: [],
   savedPath: null,
+  savedCount: 0,
   error: null,
   loading: false,
 
@@ -71,22 +79,33 @@ export const useImportStore = create<ImportState>((set, get) => ({
     try {
       const { matchResults } = get();
       const trackPaths = matchResults
-        .filter((r) => r.status === "matched" || r.status === "confirmed" || r.status === "manual")
-        .map((r) => {
-          const match = r.user_selected || r.best_match;
-          return match?.local_track.file_path ?? "";
-        })
+        .filter((r) => SAVEABLE.includes(r.status))
+        .map((r) => (r.user_selected || r.best_match)?.local_track.file_path ?? "")
         .filter(Boolean);
 
-      const result = await rpcCall<{ path: string }>("write_playlist", {
+      const result = await rpcCall<{ path: string; count: number }>("write_playlist", {
         name,
         track_paths: trackPaths,
       });
-      set({ savedPath: result.path, step: "done", loading: false });
+      set({ savedPath: result.path, savedCount: result.count, step: "done", loading: false });
     } catch (e) {
       set({ error: String(e), loading: false, step: "results" });
     }
   },
+
+  resolveMatch: (index, candidate) =>
+    set((s) => {
+      const matchResults = s.matchResults.slice();
+      matchResults[index] = { ...matchResults[index], user_selected: candidate, status: "manual" };
+      return { matchResults };
+    }),
+
+  rejectMatch: (index) =>
+    set((s) => {
+      const matchResults = s.matchResults.slice();
+      matchResults[index] = { ...matchResults[index], user_selected: null, status: "missing" };
+      return { matchResults };
+    }),
 
   reset: () =>
     set({
@@ -96,6 +115,7 @@ export const useImportStore = create<ImportState>((set, get) => ({
       sourceTracks: [],
       matchResults: [],
       savedPath: null,
+      savedCount: 0,
       error: null,
       loading: false,
     }),

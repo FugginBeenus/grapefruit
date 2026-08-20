@@ -152,6 +152,7 @@ function ResultsStep() {
   const matched = matchResults.filter((r) => ["matched", "confirmed", "manual"].includes(r.status)).length;
   const uncertain = matchResults.filter((r) => r.status === "uncertain").length;
   const missing = matchResults.filter((r) => r.status === "missing").length;
+  const saveable = matched + uncertain;
 
   return (
     <div className="flex flex-col gap-4">
@@ -175,10 +176,10 @@ function ResultsStep() {
           />
           <button
             onClick={() => savePlaylist(name)}
-            disabled={!name.trim() || matched === 0 || loading}
+            disabled={!name.trim() || saveable === 0 || loading}
             className="btn btn-primary text-xs"
           >
-            {loading ? "Saving..." : "Save to Device"}
+            {loading ? "Saving..." : `Save ${saveable} to Device`}
           </button>
         </div>
       </div>
@@ -199,9 +200,7 @@ function DoneStep() {
   const navigate = useNavigate();
   const { metadata, reset } = useImportStore();
   const { refreshPlaylists } = useDeviceStore();
-  const matchResults = useImportStore((s) => s.matchResults);
-
-  const matched = matchResults.filter((r) => ["matched", "confirmed", "manual"].includes(r.status)).length;
+  const savedCount = useImportStore((s) => s.savedCount);
   const playlistName = metadata?.name ?? "playlist";
 
   const handleView = () => {
@@ -220,7 +219,7 @@ function DoneStep() {
       <div>
         <p className="text-lg font-bold text-t">Playlist Saved!</p>
         <p className="text-sm text-t-muted mt-1">
-          "{playlistName}" -- {matched} tracks saved to your device
+          {savedCount} track{savedCount !== 1 ? "s" : ""} saved to "{playlistName}"
         </p>
       </div>
       <div className="flex gap-3 justify-center">

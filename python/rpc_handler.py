@@ -201,18 +201,25 @@ class RpcHandler:
 
         name = params["name"]
         track_paths = params.get("track_paths", [])
+
+        def norm(p):
+            return str(p).replace("\\", "/").lstrip("/").lower()
+
+        # Match results carry absolute file paths, other callers send relative
+        # ones, so index device tracks by both.
         dt_by_path = {}
         for dt in self._session.device_tracks:
-            dt_by_path[dt.relative_path.lower()] = dt
+            dt_by_path[norm(dt.file_path)] = dt
+            dt_by_path[norm(dt.relative_path)] = dt
 
         tracks = []
         for tp in track_paths:
-            dt = dt_by_path.get(tp.lower().lstrip("/"))
+            dt = dt_by_path.get(norm(tp))
             if dt:
                 tracks.append(dt)
 
         output_path = library.write_playlist(name, tracks)
-        return {"path": str(output_path)}
+        return {"path": str(output_path), "count": len(tracks)}
 
     def _rpc_delete_playlist(self, params: dict):
         _require(params, "path")
