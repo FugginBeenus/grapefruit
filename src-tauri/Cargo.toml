@@ -1,6 +1,6 @@
 [package]
 name = "grapefruit"
-version = "2.2.3"
+version = "2.2.4"
 description = "Grapefruit Music Manager"
 authors = ["you"]
 license = ""

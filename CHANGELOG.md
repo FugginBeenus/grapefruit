@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.4] - 2026-06-15
+
+### Fixed
+- Imported playlists saved with no tracks. The playlist writer matched device
+  tracks by relative path while the app sends absolute paths, so nothing
+  matched and the m3u8 came out empty. It now matches on both.
+- Match percentages showed values like 10000% (the score was scaled twice).
+
+### Added
+- Manual matching in the import flow: resolve an uncertain or missing track by
+  picking one of the suggestions or searching your library. Uncertain matches
+  are now included when you save.
+
 ## [2.2.3] - 2026-06-15
 
 ### Added
