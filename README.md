@@ -48,17 +48,29 @@ Built with Tauri (Rust) and React, with a Python engine for scraping, matching, 
 
 ## Screenshots
 
-**Streaming Gap.** Point it at a streaming source and your library, and it tells you what you are missing.
+Same app, light or dark. Toggle it from the sidebar.
 
-![Streaming Gap](assets/screenshots/streaming-gap.png)
+![Grapefruit in dark and light themes](assets/screenshots/dark-light.png)
 
-**Library.** Browse and search everything you own.
+**Library.** Your hub. Every track you own in one place, each tagged with where else it lives: library, device, Plex, or Spotify.
 
 ![Library](assets/screenshots/library.png)
 
-**Connect Spotify.** A one-time, bring-your-own-app setup for full-library analysis.
+**Streaming Gap.** Point it at a Spotify or Apple Music playlist and it lists only the songs you do not already have.
 
-![Spotify setup](assets/screenshots/spotify-setup.png)
+![Streaming Gap](assets/screenshots/streaming-gap.png)
+
+**Playlists.** Pulled in from every source and tagged. Edit one in your library, then sync it anywhere.
+
+![Playlists](assets/screenshots/playlists.png)
+
+**Device Sync.** Selective, full mirror, or delta. You pick how your device follows the library.
+
+![Device Sync](assets/screenshots/device-sync.png)
+
+**Settings.** Connect Plex, Spotify, and Soulseek from one place.
+
+![Settings](assets/screenshots/settings-soulseek.png)
 
 ## Install
 
