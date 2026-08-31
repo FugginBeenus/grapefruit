@@ -15,6 +15,17 @@ export function plexSyncPlaylists(playlists?: string[]) {
   return rpcCall<PlexSyncResult[]>("plex_sync_playlists", playlists ? { playlists } : {});
 }
 
+export interface PlexPlaylist { ratingKey: string; title: string; leafCount: number; }
+
+export function plexListPlaylists() {
+  return rpcCall<PlexPlaylist[]>("plex_list_playlists");
+}
+
+/** Device relative_paths that also exist on Plex (presence check, no tag reads). */
+export function plexPresentPaths() {
+  return rpcCall<string[]>("plex_present_paths");
+}
+
 export function loadPlexConfig() {
   return rpcCall<PlexConfig>("load_plex_config");
 }

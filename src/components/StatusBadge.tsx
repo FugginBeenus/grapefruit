@@ -1,18 +1,22 @@
 import type { MatchStatus } from "../types/models";
 
-const config: Record<MatchStatus, { label: string; cls: string }> = {
-  matched: { label: "Matched", cls: "bg-ok-muted text-ok" },
-  confirmed: { label: "Confirmed", cls: "bg-ok-muted text-ok" },
-  uncertain: { label: "Uncertain", cls: "bg-warn-muted text-warn" },
-  missing: { label: "Missing", cls: "bg-err-muted text-err" },
-  manual: { label: "Manual", cls: "bg-info-muted text-info" },
-  rejected: { label: "Rejected", cls: "bg-bg-surface text-t-muted" },
+const config: Record<MatchStatus, { label: string; tone: string }> = {
+  matched: { label: "Matched", tone: "emer" },
+  confirmed: { label: "Confirmed", tone: "emer" },
+  uncertain: { label: "Uncertain", tone: "amber" },
+  missing: { label: "Missing", tone: "err" },
+  manual: { label: "Manual", tone: "cyan" },
+  rejected: { label: "Rejected", tone: "muted" },
 };
 
 export function StatusBadge({ status }: { status: MatchStatus }) {
   const c = config[status];
+  const style =
+    c.tone === "muted"
+      ? { background: "var(--panel2)", color: "var(--ink3)" }
+      : { background: `var(--${c.tone}S)`, color: `var(--${c.tone})` };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide ${c.cls}`}>
+    <span className="inline-flex items-center px-2 py-1 rounded-md font-mono text-[8px] font-semibold uppercase tracking-[.08em]" style={style}>
       {c.label}
     </span>
   );

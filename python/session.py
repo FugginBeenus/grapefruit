@@ -13,9 +13,13 @@ class Session:
 
     def __init__(self):
         self._lock = threading.RLock()
+        # Primary connection — the library/hub the Library view is built from.
         self.device_mount: Path | None = None
         self.device_tracks: list = []
         self.rockbox_library = None
+        # Secondary connection — the iPod (a separate sync target that can be
+        # connected alongside the library).
+        self.ipod_mount: Path | None = None
         self.match_results: list = []
         self.plex_client = None
         self.sync_engine = None
@@ -38,6 +42,11 @@ class Session:
             self.match_results = []
             self.sync_engine = None
             self._action_history = []
+
+    def clear_ipod(self):
+        """Disconnect the secondary iPod, leaving the library untouched."""
+        with self._lock:
+            self.ipod_mount = None
 
     def record_action(self, action: dict):
         """Record a reversible action for undo support."""

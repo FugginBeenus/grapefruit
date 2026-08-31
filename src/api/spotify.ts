@@ -31,3 +31,15 @@ export async function spotifyFetchLibrary(includePlaylists: boolean): Promise<{
 }> {
   return rpcCall("spotify_fetch_library", { include_playlists: includePlaylists });
 }
+
+/** Device relative_paths matching a track in the user's Spotify library ([] if not connected). */
+export async function spotifyPresentPaths(): Promise<string[]> {
+  return rpcCall<string[]>("spotify_present_paths");
+}
+
+export interface SpotifyPlaylistInfo { name: string; track_count: number; }
+
+/** The user's Spotify playlists (name + count); [] if not connected. */
+export async function spotifyListPlaylists(): Promise<SpotifyPlaylistInfo[]> {
+  return rpcCall<SpotifyPlaylistInfo[]>("spotify_list_playlists");
+}

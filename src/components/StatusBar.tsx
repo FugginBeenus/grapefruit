@@ -1,72 +1,47 @@
 import { useDeviceStore } from "../stores/deviceStore";
 
-function formatDuration(seconds: number): string {
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}m ${s}s`;
-  }
+function fmtDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
+  return h > 0 ? `${h}H ${m}M` : `${m}M`;
 }
 
-function formatSize(bytes: number): string {
+function fmtSize(bytes: number): string {
   const gb = bytes / 1024 ** 3;
-  if (gb >= 1) return `${gb.toFixed(1)} GB`;
-  const mb = bytes / 1024 ** 2;
-  return `${mb.toFixed(1)} MB`;
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`;
 }
 
 export function StatusBar() {
   const { selectedDevice, tracks } = useDeviceStore();
-
-  const totalDuration = tracks.reduce((sum, t) => sum + (t.duration_seconds ?? 0), 0);
-  const totalSize = tracks.reduce((sum, t) => sum + (t.file_size ?? 0), 0);
-
+  const duration = tracks.reduce((s, t) => s + (t.duration_seconds ?? 0), 0);
+  const size = tracks.reduce((s, t) => s + (t.file_size ?? 0), 0);
   const isLocal = selectedDevice?.firmware === "local";
-  // For a local library, gauge the library's footprint against the room it has
-  // to grow — not the whole volume's usage (which reflects the entire disk).
-  const usageNumer = isLocal ? totalSize : selectedDevice?.used_bytes ?? 0;
-  const usageDenom = isLocal
-    ? totalSize + (selectedDevice?.free_bytes ?? 0)
-    : selectedDevice?.capacity_bytes ?? 0;
-  const usagePct = usageDenom > 0 ? (usageNumer / usageDenom) * 100 : 0;
 
   return (
-    <div className="h-9 shrink-0 flex items-center justify-between px-4 border-t text-[12px] select-none" style={{ background: "linear-gradient(90deg, #0F0F15 0%, #0B0B10 100%)" }}>
-      {/* Left: track stats */}
-      <div className="flex items-center gap-3 text-t-muted">
-        {tracks.length > 0 ? (
-          <>
-            <span className="text-cyan">{tracks.length.toLocaleString()} tracks</span>
-            {totalDuration > 0 && <><span className="text-b-light">&middot;</span> <span className="text-violet">{formatDuration(totalDuration)}</span></>}
-            {totalSize > 0 && <><span className="text-b-light">&middot;</span> <span className="text-amber">{formatSize(totalSize)}</span></>}
-          </>
-        ) : (
-          <span>No tracks loaded</span>
-        )}
+    <div className="h-9 shrink-0 px-[18px] bg-panel border-t border-line flex items-center gap-4 font-mono text-[9px] text-ink3 overflow-hidden">
+      <div className="flex items-center gap-[7px] shrink-0">
+        <span className="w-[5px] h-[5px] rounded-full" style={{ background: "var(--emer)" }} />
+        <span className="text-ink2">ENGINE READY</span>
       </div>
-
-      {/* Center: operation status (slot for future use) */}
-      <div className="text-t-muted" />
-
-      {/* Right: device info */}
-      <div className="flex items-center gap-2 text-t-muted">
-        {selectedDevice ? (
-          <>
-            <span className="dot dot-ok" />
-            <span className="text-t-secondary">{selectedDevice.label || "Device"}</span>
-            <span className={usagePct > 90 ? "text-err" : ""}>
-              {isLocal
-                ? `${formatSize(totalSize)} library · ${formatSize(selectedDevice.free_bytes)} free`
-                : `${formatSize(selectedDevice.used_bytes)} / ${formatSize(selectedDevice.capacity_bytes)}`}
-            </span>
-          </>
+      {tracks.length > 0 && (
+        <>
+          <div className="shrink-0">{tracks.length.toLocaleString()} TRACKS</div>
+          {duration > 0 && <div className="shrink-0">{fmtDuration(duration)}</div>}
+          {size > 0 && <div className="shrink-0">{fmtSize(size)}</div>}
+        </>
+      )}
+      <div className="flex-1" />
+      {selectedDevice ? (
+        isLocal ? (
+          <div className="shrink-0 truncate max-w-[50%]">{String(selectedDevice.mount_point).toUpperCase()}</div>
         ) : (
-          <span>No device connected</span>
-        )}
-      </div>
+          <div className="shrink-0" style={{ color: "var(--cyan)" }}>
+            {(selectedDevice.label || "DEVICE").toUpperCase()} {fmtSize(selectedDevice.used_bytes)}/{fmtSize(selectedDevice.capacity_bytes)}
+          </div>
+        )
+      ) : (
+        <div className="shrink-0">NO LIBRARY CONNECTED</div>
+      )}
     </div>
   );
 }

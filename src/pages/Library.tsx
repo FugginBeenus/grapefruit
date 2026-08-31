@@ -1,10 +1,12 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useDeviceStore } from "../stores/deviceStore";
+import { poolLocations } from "../api/locations";
 import { rpcCall } from "../api/sidecar";
 import { open } from "@tauri-apps/plugin-dialog";
 import TrackTable from "../components/TrackTable";
 import type { SortField } from "../components/TrackTable";
 import MetadataEditor from "../components/MetadataEditor";
+import { IncomingReviewModal } from "../components/IncomingReviewModal";
 import { ProgressBar } from "../components/ProgressBar";
 import { useProgress } from "../hooks/useProgress";
 import type { DeviceTrack, TrackMetadata, AlbumArt } from "../types/models";
@@ -58,6 +60,43 @@ function MusicIcon({ className }: { className: string }) {
   return <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1}><path strokeLinecap="round" strokeLinejoin="round" d={MUSIC_NOTE} /></svg>;
 }
 
+/* Lazy-loaded album artwork with a gradient + note fallback. Reads embedded
+   art from the album's first track only when the tile scrolls into view, and
+   caches per album so re-scrolling never refetches. */
+const artCache = new Map<string, string | null>();
+
+function AlbumArtThumb({ album, track, fallback, iconColor }: { album: string; track?: DeviceTrack; fallback: string; iconColor: string }) {
+  const [src, setSrc] = useState<string | null>(() => artCache.get(album) ?? null);
+  const [done, setDone] = useState(() => artCache.has(album));
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (done || !track) return;
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0].isIntersecting) return;
+      io.disconnect();
+      rpcCall<AlbumArt>("get_album_art", { path: track.relative_path })
+        .then((a) => {
+          const url = a?.has_artwork && a.data ? `data:${a.mime || "image/jpeg"};base64,${a.data}` : null;
+          artCache.set(album, url);
+          setSrc(url);
+          setDone(true);
+        })
+        .catch(() => { artCache.set(album, null); setDone(true); });
+    }, { rootMargin: "200px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [album, track, done]);
+
+  return (
+    <div ref={ref} className="w-full aspect-square rounded-lg flex items-center justify-center mb-2.5 overflow-hidden" style={{ background: fallback }}>
+      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : <MusicIcon className={`w-10 h-10 ${iconColor}`} />}
+    </div>
+  );
+}
+
 /* ================================================================ */
 /*  Library                                                          */
 /* ================================================================ */
@@ -88,9 +127,16 @@ export default function Library() {
   const [toast, setToast] = useState<{ msg: string; type: "ok" | "err" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [showAddInput, setShowAddInput] = useState(false);
+  const [showIncoming, setShowIncoming] = useState(false);
   const [addPath, setAddPath] = useState("");
   const progress = useProgress("scan_device_library");
   const addProgress = useProgress("add_files");
+  const poolProgress = useProgress("pool_locations");
+  const [libPaths, setLibPaths] = useState<Set<string> | null>(null);
+  const [devPaths, setDevPaths] = useState<Set<string> | null>(null);
+  const [plexPaths, setPlexPaths] = useState<Set<string> | null>(null);
+  const [spotifyPaths, setSpotifyPaths] = useState<Set<string> | null>(null);
+  const [loadingPlex, setLoadingPlex] = useState(false);
 
   /* ── Derived data ───────────────────────────────── */
   const filteredTracks = useMemo(() => {
@@ -118,6 +164,7 @@ export default function Library() {
         case "title": cmp = (a.title || "").localeCompare(b.title || ""); break;
         case "artist": cmp = (a.artist || "").localeCompare(b.artist || ""); break;
         case "album": cmp = (a.album || "").localeCompare(b.album || ""); break;
+        case "track": cmp = (a.track_number ?? 9999) - (b.track_number ?? 9999); break;
         case "duration": cmp = (a.duration_seconds ?? 0) - (b.duration_seconds ?? 0); break;
         case "size": cmp = a.file_size - b.file_size; break;
         case "format": cmp = a.format.localeCompare(b.format); break;
@@ -148,6 +195,27 @@ export default function Library() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
+
+  const loadLocations = useCallback(async () => {
+    setLoadingPlex(true);
+    try {
+      const res = await poolLocations();
+      setLibPaths(new Set(res.lib.paths));
+      setDevPaths(new Set(res.dev.paths));
+      setPlexPaths(new Set(res.plex.paths));
+      setSpotifyPaths(new Set(res.spotify.paths));
+      const parts: string[] = [];
+      if (res.lib.available) parts.push(`${res.lib.paths.length.toLocaleString()} in library`);
+      if (res.dev.available) parts.push(`${res.dev.paths.length.toLocaleString()} on device`);
+      if (res.plex.available) parts.push(`${res.plex.paths.length.toLocaleString()} on Plex`);
+      if (res.spotify.available) parts.push(`${res.spotify.paths.length.toLocaleString()} on Spotify`);
+      flash(parts.length ? `Tagged · ${parts.join(", ")}` : "No sources connected to tag against");
+    } catch (e) {
+      flash(String(e), "err");
+    } finally {
+      setLoadingPlex(false);
+    }
+  }, [flash]);
 
   const handleSort = useCallback((col: SortField) => {
     if (col === sortColumn) setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
@@ -282,89 +350,94 @@ export default function Library() {
   /*  Render                                                           */
   /* ================================================================ */
   return (
-    <div className="flex flex-col h-[calc(100vh-80px)]">
-      {/* ── Header ──────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-6 shrink-0 pt-2">
-        <div>
-          <h1 className="text-3xl font-bold text-t tracking-tight">Library</h1>
-          <div className="flex items-center gap-2 mt-2">
-            {tracks.length > 0 ? (
-              <>
-                <span className="badge badge-cyan">{tracks.length.toLocaleString()} tracks</span>
-                <span className="badge badge-violet">{formatTotalDuration(tracks)}</span>
-                <span className="badge badge-amber">{formatTotalSize(tracks)}</span>
-              </>
-            ) : (
-              <p className="text-sm text-t-muted">Scan your device to load tracks</p>
-            )}
-          </div>
+    <div className="flex flex-col gap-4 max-w-[1600px]">
+      {/* Header */}
+      <div className="flex items-end gap-5 flex-wrap shrink-0">
+        <div className="flex items-baseline gap-3.5">
+          <div className="font-display font-extrabold leading-[0.85] tracking-[-0.045em] text-ink" style={{ fontSize: "clamp(40px, 5vw, 64px)" }}>{tracks.length.toLocaleString()}</div>
+          <div className="text-[19px] font-semibold tracking-[-0.02em] text-ink2">tracks you own</div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex bg-bg-surface rounded-lg p-0.5">
-            <button
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                view === "table" ? "bg-bg-hover text-t" : "text-t-muted hover:text-t-secondary"
-              }`}
-              onClick={() => { setView("table"); setAlbumFilter(null); }}
-            >
-              Table
-            </button>
-            <button
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                view === "albums" ? "bg-bg-hover text-t" : "text-t-muted hover:text-t-secondary"
-              }`}
-              onClick={() => { setView("albums"); setAlbumFilter(null); }}
-            >
-              Albums
-            </button>
+        <div className="flex-1" />
+        {tracks.length > 0 && (
+          <div className="flex gap-[22px] flex-wrap items-center">
+            <div className="flex flex-col gap-0.5"><div className="font-mono text-[8px] tracking-[.14em] text-ink3">DURATION</div><div className="text-[18px] font-bold text-ink">{formatTotalDuration(tracks)}</div></div>
+            <div className="w-px self-stretch" style={{ background: "var(--line)" }} />
+            <div className="flex flex-col gap-0.5"><div className="font-mono text-[8px] tracking-[.14em] text-ink3">SIZE</div><div className="text-[18px] font-bold text-ink">{formatTotalSize(tracks)}</div></div>
+            <div className="w-px self-stretch" style={{ background: "var(--line)" }} />
+            <div className="flex flex-col gap-0.5"><div className="font-mono text-[8px] tracking-[.14em] text-ink3">ALBUMS</div><div className="text-[18px] font-bold text-ink">{new Set(tracks.map((t) => t.album || "Unknown")).size.toLocaleString()}</div></div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ── Toolbar ─────────────────────────────────── */}
-      <div className="flex items-center gap-3 mb-4 shrink-0">
-        {/* Search */}
-        <div className="relative flex-1 max-w-md">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-t-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+      <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+        <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-full bg-panel border border-line w-64 max-w-full">
+          <svg className="w-3.5 h-3.5 text-ink3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
-          <input
-            className="input input-with-icon py-2 text-sm"
-            placeholder="Search tracks..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <input className="bg-transparent outline-none text-[12px] text-ink flex-1 min-w-0 placeholder:text-ink3" placeholder="Title, artist, album" value={search} onChange={(e) => setSearch(e.target.value)} />
           {search && (
-            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-t-muted hover:text-t transition-colors">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+            <button onClick={() => setSearch("")} className="text-ink3 hover:text-ink transition-colors shrink-0">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           )}
         </div>
 
-        {/* Album filter badge */}
         {albumFilter && (
-          <button
-            onClick={() => setAlbumFilter(null)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gf-glow text-gf text-xs font-medium border border-gf-border"
-          >
-            Album: {albumFilter}
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <button onClick={() => setAlbumFilter(null)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium" style={{ background: "var(--brandS)", color: "var(--brand)" }}>
+            {albumFilter} \u2715
           </button>
         )}
 
         <div className="flex-1" />
 
-        {/* Actions */}
-        <button className="btn btn-ghost text-xs" onClick={() => setShowAddInput((v) => !v)}>
-          + Add Files
-        </button>
-        <button className="btn btn-ghost text-xs" onClick={handleRefresh} disabled={loadingLibrary}>
-          {loadingLibrary ? "Scanning..." : "\u21BB Refresh"}
-        </button>
+        {view === "table" && (
+          <div className="flex items-center gap-1.5">
+            <select
+              value={sortColumn}
+              onChange={(e) => setSortColumn(e.target.value as SortField)}
+              title="Sort by"
+              className="rounded-full text-[11px] font-medium text-ink2 px-3 py-1.5 outline-none cursor-pointer"
+              style={{ background: "var(--panel2)", border: "1px solid var(--line)" }}
+            >
+              <option value="title">Title</option>
+              <option value="artist">Artist</option>
+              <option value="album">Album</option>
+              <option value="track">Track #</option>
+              <option value="duration">Duration</option>
+              <option value="size">Size</option>
+              <option value="format">Format</option>
+            </select>
+            <button
+              onClick={() => setSortDirection((d) => (d === "asc" ? "desc" : "asc"))}
+              title={sortDirection === "asc" ? "Ascending" : "Descending"}
+              className="w-7 h-7 rounded-full panel2 flex items-center justify-center text-ink2 hover:text-ink transition-colors shrink-0"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} style={{ transform: sortDirection === "asc" ? "none" : "rotate(180deg)" }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {view === "table" && (
+          <button onClick={loadLocations} disabled={loadingPlex} title="Tag each track by which sources hold it — library, device, Plex, Spotify"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors"
+            style={(libPaths || devPaths || plexPaths || spotifyPaths) ? { background: "var(--cyanS)", color: "var(--cyan)" } : { background: "var(--panel2)", color: "var(--ink2)", border: "1px solid var(--line)" }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--cyan)" }} />
+            {loadingPlex ? "Pooling sources..." : (libPaths || devPaths || plexPaths || spotifyPaths) ? "Locations tagged" : "Tag locations"}
+          </button>
+        )}
+
+        <div className="flex gap-1 p-[3px] rounded-full panel2">
+          <button onClick={() => { setView("table"); setAlbumFilter(null); }} className="px-3.5 py-1.5 rounded-full text-[11px] transition-all"
+            style={view === "table" ? { background: "var(--panel)", fontWeight: 700, color: "var(--ink)", boxShadow: "var(--shadow)" } : { fontWeight: 500, color: "var(--ink2)" }}>Table</button>
+          <button onClick={() => { setView("albums"); setAlbumFilter(null); }} className="px-3.5 py-1.5 rounded-full text-[11px] transition-all"
+            style={view === "albums" ? { background: "var(--panel)", fontWeight: 700, color: "var(--ink)", boxShadow: "var(--shadow)" } : { fontWeight: 500, color: "var(--ink2)" }}>Albums</button>
+        </div>
+        <button className="btn btn-secondary text-xs" onClick={() => setShowIncoming(true)}>Incoming</button>
+        <button className="btn btn-secondary text-xs" onClick={handleRefresh} disabled={loadingLibrary}>{loadingLibrary ? "Scanning..." : "Refresh"}</button>
+        <button className="btn btn-primary text-xs" onClick={() => setShowAddInput((v) => !v)}>Add files</button>
       </div>
 
       {/* ── Add files bar ───────────────────────────── */}
@@ -399,6 +472,16 @@ export default function Library() {
           <ProgressBar percent={addProgress.percent} label="Adding files..." sublabel={`${addProgress.current} / ${addProgress.total}`} />
         </div>
       )}
+      {loadingPlex && (
+        <div className="mb-4 shrink-0">
+          <ProgressBar
+            percent={poolProgress.total > 1 ? poolProgress.percent : 0}
+            indeterminate={poolProgress.total <= 1}
+            label={poolProgress.message || "Pooling sources..."}
+            sublabel={poolProgress.total > 1 ? `${poolProgress.current.toLocaleString()} / ${poolProgress.total.toLocaleString()}` : undefined}
+          />
+        </div>
+      )}
 
       {/* ── Toast ───────────────────────────────────── */}
       {toast && (
@@ -410,8 +493,8 @@ export default function Library() {
         </div>
       )}
 
-      {/* ── Main content ────────────────────────────── */}
-      <div className="flex-1 min-h-0">
+      {/* Main content */}
+      <div className="rounded-2xl border border-line bg-panel overflow-hidden shrink-0" style={{ height: "calc(100vh - 310px)", minHeight: "360px", boxShadow: "var(--shadow)" }}>
         {/* Table view */}
         {view === "table" && tracks.length > 0 && (
           <TrackTable
@@ -423,6 +506,10 @@ export default function Library() {
             sortColumn={sortColumn}
             sortDirection={sortDirection}
             onSort={handleSort}
+            libPaths={libPaths ?? undefined}
+            devPaths={devPaths ?? undefined}
+            plexPaths={plexPaths ?? undefined}
+            spotifyPaths={spotifyPaths ?? undefined}
           />
         )}
 
@@ -457,10 +544,7 @@ export default function Library() {
                 onClick={() => handleAlbumClick(group.album)}
                 className="flex flex-col text-left rounded-xl p-2.5 transition-all duration-150 hover:bg-bg-hover hover:scale-[1.02] group"
               >
-                {/* Placeholder art */}
-                <div className="w-full aspect-square rounded-lg flex items-center justify-center mb-2.5" style={{ background: albumStyleFromName(group.album).bg }}>
-                  <MusicIcon className={`w-10 h-10 ${albumStyleFromName(group.album).iconColor}`} />
-                </div>
+                <AlbumArtThumb album={group.album} track={group.tracks[0]} fallback={albumStyleFromName(group.album).bg} iconColor={albumStyleFromName(group.album).iconColor} />
                 <p className="text-[13px] font-medium text-t truncate w-full">{group.album}</p>
                 <p className="text-[11px] text-t-muted truncate w-full">{group.artist}</p>
                 <p className="text-[11px] text-t-muted mt-0.5">
@@ -475,11 +559,11 @@ export default function Library() {
       {/* ── Selection toolbar ───────────────────────── */}
       {selectedIndices.size > 0 && (
         <div
-          className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border-t border-b rounded-t-xl shrink-0"
-          style={{ animation: "slideUp 150ms ease-out" }}
+          className="flex items-center justify-between px-4 py-2.5 rounded-2xl border border-line bg-panel shrink-0"
+          style={{ animation: "slideUp 150ms ease-out", boxShadow: "var(--shadow)" }}
         >
-          <span className="text-sm text-t-secondary">
-            {selectedIndices.size} track{selectedIndices.size !== 1 ? "s" : ""} selected
+          <span className="font-mono text-[10px] tracking-[.1em] text-ink2">
+            {selectedIndices.size} SELECTED · RIGHT-CLICK FOR ACTIONS
           </span>
           <div className="flex items-center gap-2">
             <button className="btn btn-ghost text-xs" onClick={() => {
@@ -524,6 +608,10 @@ export default function Library() {
           onClose={() => { setEditMeta(null); setEditArt(null); setEditTrackPath(null); }}
           onArtChange={handleArtChange}
         />
+      )}
+
+      {showIncoming && (
+        <IncomingReviewModal onClose={() => setShowIncoming(false)} onImported={() => refreshLibrary()} />
       )}
     </div>
   );

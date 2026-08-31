@@ -6,11 +6,9 @@ import { useDeviceStore } from "../stores/deviceStore";
 import { useToastStore } from "../stores/toastStore";
 import { spotifyGetStatus } from "../api/spotify";
 import { rpcCall } from "../api/sidecar";
-import { ProgressBar } from "../components/ProgressBar";
 import { useProgress } from "../hooks/useProgress";
+import { SoulseekSearchModal } from "../components/SoulseekSearchModal";
 import type { MatchResult, SpotifyStatus } from "../types/models";
-
-/* ── helpers ─────────────────────────────────── */
 
 const isMissing = (r: MatchResult) => r.status === "missing" || r.status === "rejected";
 const isUncertain = (r: MatchResult) => r.status === "uncertain";
@@ -18,30 +16,17 @@ const isUncertain = (r: MatchResult) => r.status === "uncertain";
 function buildTxt(rows: MatchResult[]): string {
   return rows.map((r) => `${r.playlist_track.artist} - ${r.playlist_track.title}`).join("\n") + "\n";
 }
-
 function csvEscape(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
-
 function buildCsv(rows: MatchResult[]): string {
   const header = "Artist,Title,Album,Status,Library Match\n";
-  const body = rows
-    .map((r) => {
-      const lt = r.best_match?.local_track;
-      const match = lt ? `${lt.artist} - ${lt.title}` : "";
-      return [
-        csvEscape(r.playlist_track.artist),
-        csvEscape(r.playlist_track.title),
-        csvEscape(r.playlist_track.album ?? ""),
-        r.status,
-        csvEscape(match),
-      ].join(",");
-    })
-    .join("\n");
+  const body = rows.map((r) => {
+    const lt = r.best_match?.local_track;
+    return [csvEscape(r.playlist_track.artist), csvEscape(r.playlist_track.title), csvEscape(r.playlist_track.album ?? ""), r.status, csvEscape(lt ? `${lt.artist} - ${lt.title}` : "")].join(",");
+  }).join("\n");
   return header + body + "\n";
 }
-
-/* ── page ────────────────────────────────────── */
 
 export default function Gap() {
   const gap = useGapStore();
@@ -49,229 +34,132 @@ export default function Gap() {
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
   const [includePlaylists, setIncludePlaylists] = useState(true);
 
-  useEffect(() => {
-    spotifyGetStatus().then(setSpotify).catch(() => setSpotify(null));
-  }, []);
+  useEffect(() => { spotifyGetStatus().then(setSpotify).catch(() => setSpotify(null)); }, []);
 
   const libraryReady = !!selectedDevice && tracks.length > 0;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-80px)]">
-      <div className="mb-6 pt-2">
-        <h1 className="text-3xl font-bold text-t tracking-tight">Streaming Gap</h1>
-        <p className="text-sm text-t-muted mt-1">
-          Find the songs in your streaming world that are missing from the library you own
-        </p>
-      </div>
+    <div className="flex flex-col gap-[18px] max-w-[1600px]">
+      {!selectedDevice ? (
+        <ConnectLibraryPrompt onConnect={connectLocalLibrary} />
+      ) : loadingLibrary ? (
+        <WorkingPanel title="Scanning" op="scan_device_library" note="Reading your library from disk." />
+      ) : gap.step === "idle" ? (
+        <SourcePicker spotify={spotify} includePlaylists={includePlaylists} setIncludePlaylists={setIncludePlaylists} libraryReady={libraryReady} trackCount={tracks.length} />
+      ) : gap.step === "fetching" ? (
+        <WorkingPanel title="Fetching" op={gap.source === "spotify" ? "spotify_fetch" : "fetch_playlist"} note="Reading the source." />
+      ) : gap.step === "matching" ? (
+        <WorkingPanel title="Matching" op="match_tracks" note="Fuzzy-matching titles against your local files. You can leave this screen; the run continues in the background." />
+      ) : (
+        <Results />
+      )}
 
-      <div className="flex-1 min-h-0 overflow-y-auto pb-6">
-        {!selectedDevice ? (
-          <ConnectLibraryPrompt onConnect={connectLocalLibrary} />
-        ) : loadingLibrary ? (
-          <ScanningCard />
-        ) : gap.step === "idle" ? (
-          <SourcePicker
-            spotify={spotify}
-            includePlaylists={includePlaylists}
-            setIncludePlaylists={setIncludePlaylists}
-            libraryReady={libraryReady}
-          />
-        ) : gap.step === "fetching" || gap.step === "matching" ? (
-          <WorkingCard step={gap.step} source={gap.source} />
-        ) : (
-          <Results />
-        )}
-
-        {gap.error && (
-          <div className="mt-4 p-4 rounded-xl bg-err-muted border border-err/20 text-[13px] text-err flex items-center justify-between">
-            <span>{gap.error}</span>
-            <button onClick={() => gap.reset()} className="btn btn-ghost text-xs text-err ml-4">
-              Dismiss
-            </button>
-          </div>
-        )}
-      </div>
+      {gap.error && (
+        <div className="p-4 rounded-2xl border border-line flex items-center justify-between gf-in" style={{ background: "var(--errS)" }}>
+          <span className="text-[13px] text-err">{gap.error}</span>
+          <button onClick={() => gap.reset()} className="btn btn-ghost text-xs">Dismiss</button>
+        </div>
+      )}
     </div>
   );
 }
-
-/* ── empty state: no library ─────────────────── */
 
 function ConnectLibraryPrompt({ onConnect }: { onConnect: (path: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
   const browse = async () => {
     setErr(null);
     try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: false,
-        title: "Select your music library folder",
-      });
-      if (!selected) return;
+      const sel = await openDialog({ directory: true, multiple: false, title: "Select your music library folder" });
+      if (!sel) return;
       setBusy(true);
-      await onConnect(typeof selected === "string" ? selected : String(selected));
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setBusy(false);
-    }
+      await onConnect(typeof sel === "string" ? sel : String(sel));
+    } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
-
   return (
-    <div className="max-w-md mx-auto mt-16 text-center">
-      <div
-        className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(255, 127, 102, 0.18) 0%, rgba(229, 80, 58, 0.08) 100%)",
-          boxShadow: "0 0 40px rgba(255, 99, 71, 0.12)",
-        }}
-      >
-        <svg className="w-8 h-8 text-gf/70" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-        </svg>
+    <div className="card gf-in p-[40px] flex flex-col gap-6 max-w-[640px]">
+      <div className="font-mono text-[9px] tracking-[.18em] text-brand">STEP ZERO</div>
+      <div className="text-[40px] font-display font-extrabold leading-[1.02] tracking-[-0.035em] text-ink">Connect the library you own.</div>
+      <p className="text-[14px] leading-[1.6] text-ink2 max-w-[520px]">The gap report compares a streaming source against the music already on your disk. Point Grapefruit at that folder to begin. Nothing is downloaded or written.</p>
+      <div>
+        <button onClick={browse} disabled={busy} className="btn btn-primary">{busy ? "Connecting..." : "Choose music folder"}</button>
       </div>
-      <h2 className="text-lg font-bold text-t">Connect your music library</h2>
-      <p className="text-sm text-t-muted mt-2 mb-6 leading-relaxed">
-        The gap report compares streaming playlists against the music you already own.
-        Point Grapefruit at your music folder (or connect a device) to get started.
-      </p>
-      <button onClick={browse} disabled={busy} className="btn btn-primary">
-        {busy ? "Connecting..." : "Choose Music Folder"}
-      </button>
-      {err && <p className="text-[12px] text-err mt-3">{err}</p>}
+      {err && <p className="text-[12px] text-err">{err}</p>}
     </div>
   );
 }
 
-function ScanningCard() {
-  const progress = useProgress("scan_device_library");
+function WorkingPanel({ title, op, note }: { title: string; op: string; note: string }) {
+  const p = useProgress(op);
   return (
-    <div className="max-w-md mx-auto mt-16 text-center">
-      <div className="card p-6 space-y-4">
-        <p className="text-sm font-semibold text-t">Scanning your library...</p>
-        <ProgressBar
-          percent={progress.percent}
-          sublabel={progress.total > 0 ? `${progress.current.toLocaleString()} / ${progress.total.toLocaleString()}` : undefined}
-        />
+    <div className="card gf-in p-[40px] flex flex-col gap-5">
+      <div className="flex items-baseline gap-4 flex-wrap">
+        <div className="text-[44px] font-display font-extrabold tracking-[-0.035em] leading-none text-ink">{title}</div>
+        {p.total > 0 && <div className="font-mono text-[12px] text-ink2">{p.current.toLocaleString()} / {p.total.toLocaleString()} tracks</div>}
       </div>
+      <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--line)" }}>
+        {p.total > 0
+          ? <div className="h-full rounded-full" style={{ width: `${p.percent}%`, background: "var(--brand)" }} />
+          : <div className="h-full progress-indeterminate rounded-full" style={{ background: "var(--brand)" }} />}
+      </div>
+      {p.message && <div className="font-mono text-[10px] text-ink2 truncate">{p.message}</div>}
+      <div className="p-3.5 rounded-xl panel2 text-[12px] text-ink2">{note}</div>
     </div>
   );
 }
 
 /* ── source picker ───────────────────────────── */
-
-function SourcePicker({
-  spotify,
-  includePlaylists,
-  setIncludePlaylists,
-  libraryReady,
-}: {
-  spotify: SpotifyStatus | null;
-  includePlaylists: boolean;
-  setIncludePlaylists: (v: boolean) => void;
-  libraryReady: boolean;
+function SourcePicker({ spotify, includePlaylists, setIncludePlaylists, libraryReady, trackCount }: {
+  spotify: SpotifyStatus | null; includePlaylists: boolean; setIncludePlaylists: (v: boolean) => void; libraryReady: boolean; trackCount: number;
 }) {
   const { source, setSource, url, setUrl, runUrlGap, runSpotifyGap } = useGapStore();
-  const { tracks } = useDeviceStore();
   const urlValid = url.includes("spotify.com/") || url.includes("music.apple.com/");
   const connected = spotify?.connected ?? false;
   const [showAppleHelp, setShowAppleHelp] = useState(false);
 
+  const card = (key: "url" | "spotify", tag: string, title: string, desc: string) => (
+    <button onClick={() => setSource(key)}
+      className="p-5 rounded-2xl panel2 text-left flex flex-col gap-2.5 transition-colors"
+      style={source === key ? { borderColor: "var(--brandLine)", boxShadow: "inset 0 0 0 1px var(--brandLine)" } : undefined}>
+      <div className="flex items-center gap-2.5">
+        <span className="icon-box icon-box-md icon-box-emerald font-mono text-[10px] font-semibold">{tag}</span>
+        <span className="text-[14px] font-bold text-ink">{title}</span>
+        {key === "spotify" && connected && <span className="badge badge-emerald">Connected</span>}
+      </div>
+      <p className="text-[12px] leading-[1.55] text-ink2">{desc}</p>
+    </button>
+  );
+
   return (
-    <div className="max-w-2xl mx-auto mt-6">
-      {libraryReady && (
-        <p className="text-[12px] text-t-muted text-center mb-6">
-          Comparing against <span className="text-t-secondary font-semibold">{tracks.length.toLocaleString()}</span> tracks in your library
-        </p>
-      )}
-
-      {/* Source cards */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <button
-          onClick={() => setSource("url")}
-          className={`card p-4 text-left transition-all ${
-            source === "url" ? "border-gf/60 ring-1 ring-gf/30" : "hover:border-b-light"
-          }`}
-        >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="icon-box icon-box-md icon-box-pink">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-              </svg>
-            </div>
-            <p className="text-sm font-bold text-t">Playlist URL</p>
-          </div>
-          <p className="text-[12px] text-t-muted leading-relaxed">
-            Paste any public Spotify or Apple Music playlist link. No login needed.
-          </p>
-        </button>
-
-        <button
-          onClick={() => setSource("spotify")}
-          className={`card p-4 text-left transition-all ${
-            source === "spotify" ? "border-gf/60 ring-1 ring-gf/30" : "hover:border-b-light"
-          }`}
-        >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="icon-box icon-box-md icon-box-emerald">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 01-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 11-.277-1.215c3.809-.871 7.077-.496 9.713 1.115a.623.623 0 01.206.857zm1.223-2.722a.78.78 0 01-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166A.78.78 0 016.32 11.3c3.632-1.102 8.147-.568 11.234 1.328a.78.78 0 01.255 1.074zm.105-2.835c-3.223-1.914-8.54-2.09-11.618-1.156a.935.935 0 11-.543-1.79c3.532-1.072 9.404-.865 13.115 1.338a.936.936 0 01-.954 1.608z" />
-              </svg>
-            </div>
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-bold text-t">My Spotify Library</p>
-              {connected && <span className="badge badge-emerald text-[9px]">Connected</span>}
-            </div>
-          </div>
-          <p className="text-[12px] text-t-muted leading-relaxed">
-            Your entire account — Liked Songs plus every playlist you follow.
-          </p>
-        </button>
+    <>
+      <div className="card gf-in p-[40px] flex flex-col gap-6">
+        <div className="flex flex-col gap-3 max-w-[560px]">
+          <div className="font-mono text-[9px] tracking-[.18em] text-brand">STEP ONE</div>
+          <div className="text-[40px] font-display font-extrabold leading-[1.02] tracking-[-0.035em] text-ink">Pick a source to compare against.</div>
+          <div className="text-[14px] leading-[1.6] text-ink2">Grapefruit reads the source, matches it against the {trackCount.toLocaleString()} tracks you own, and lists only what is missing. Nothing is downloaded and nothing is written.</div>
+        </div>
+        <div className="grid gap-3.5 max-w-[720px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+          {card("url", "URL", "Paste a playlist link", "Any public Spotify or Apple Music playlist. No account needed.")}
+          {card("spotify", "SP", "Your full Spotify library", connected && spotify?.user_name ? `Connected as ${spotify.user_name} · liked songs and every playlist.` : "Liked songs and every playlist you follow. One-time setup in Settings.")}
+        </div>
       </div>
 
-      {/* URL mode */}
       {source === "url" && (
-        <div className="card p-5">
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
+        <div className="card p-5 gf-in">
+          <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && urlValid && runUrlGap(url)}
-            placeholder="https://open.spotify.com/playlist/..."
-            className="input text-center py-3"
-            autoFocus
-          />
-          <button
-            onClick={() => runUrlGap(url)}
-            disabled={!urlValid || !libraryReady}
-            className="btn btn-primary w-full mt-3 py-2.5"
-          >
-            Find Missing Songs
-          </button>
-          {!libraryReady && (
-            <p className="text-[11px] text-amber mt-2 text-center">
-              Your library is still scanning — hang tight.
-            </p>
-          )}
-
-          {/* Apple Music whole-library helper (no API/account needed) */}
-          <div className="mt-4 pt-3 border-t border-b-[rgba(255,255,255,0.06)]">
-            <button
-              onClick={() => setShowAppleHelp((v) => !v)}
-              className="flex items-center gap-1.5 text-[11px] text-t-muted hover:text-t-secondary transition-colors"
-            >
-              <svg className={`w-3 h-3 transition-transform ${showAppleHelp ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              </svg>
-              Compare your whole Apple Music library
+            placeholder="https://open.spotify.com/playlist/..." className="input text-center py-3" autoFocus />
+          <button onClick={() => runUrlGap(url)} disabled={!urlValid || !libraryReady} className="btn btn-primary w-full mt-3 py-2.5">Find missing songs</button>
+          {!libraryReady && <p className="text-[11px] text-amber mt-2 text-center">Your library is still scanning.</p>}
+          <div className="mt-4 pt-3 border-t border-line">
+            <button onClick={() => setShowAppleHelp((v) => !v)} className="flex items-center gap-1.5 font-mono text-[10px] text-ink3 hover:text-ink2 transition-colors">
+              <span style={{ transform: showAppleHelp ? "rotate(90deg)" : "none", transition: "transform 150ms" }}>▸</span>
+              COMPARE YOUR WHOLE APPLE MUSIC LIBRARY
             </button>
             {showAppleHelp && (
-              <ol className="text-[12px] text-t-secondary space-y-1.5 list-decimal list-inside leading-relaxed mt-3 pl-1">
+              <ol className="text-[12px] text-ink2 space-y-1.5 list-decimal list-inside leading-relaxed mt-3 pl-1">
                 <li>In Apple Music, make a new playlist (e.g. &ldquo;My Library&rdquo;).</li>
-                <li>Open your <strong>Songs</strong>, select all (⌘A / Ctrl+A), and add them to it.</li>
+                <li>Open your <strong>Songs</strong>, select all, and add them to it.</li>
                 <li>Right-click the playlist → <strong>Share</strong> → <strong>Copy Link</strong> (make it public if asked).</li>
                 <li>Paste that link above and run the report.</li>
               </ol>
@@ -280,86 +168,31 @@ function SourcePicker({
         </div>
       )}
 
-      {/* Spotify mode */}
-      {source === "spotify" &&
-        (connected ? (
-          <div className="card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-[13px] font-semibold text-t">
-                  {spotify?.user_name ? `Connected as ${spotify.user_name}` : "Connected"}
-                </p>
-                <p className="text-[11px] text-t-muted mt-0.5">
-                  Liked Songs{includePlaylists ? " + all playlists" : " only"}, deduplicated
-                </p>
-              </div>
-              <button
-                onClick={() => setIncludePlaylists(!includePlaylists)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${includePlaylists ? "bg-emerald" : "bg-bg-surface"}`}
-                title="Include playlists"
-              >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${includePlaylists ? "left-[22px]" : "left-0.5"}`} />
-              </button>
+      {source === "spotify" && (connected ? (
+        <div className="card p-5 gf-in">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-[13px] font-semibold text-ink">{spotify?.user_name ? `Connected as ${spotify.user_name}` : "Connected"}</p>
+              <p className="font-mono text-[9px] text-ink3 mt-1">LIKED SONGS{includePlaylists ? " + ALL PLAYLISTS" : " ONLY"} · DEDUPED</p>
             </div>
-            <button
-              onClick={() => runSpotifyGap(includePlaylists)}
-              disabled={!libraryReady}
-              className="btn btn-primary w-full py-2.5"
-            >
-              Analyze My Library
+            <button onClick={() => setIncludePlaylists(!includePlaylists)} title="Include playlists"
+              className="relative w-10 h-5 rounded-full transition-colors" style={{ background: includePlaylists ? "var(--emer)" : "var(--panel2)" }}>
+              <div className="absolute top-0.5 w-4 h-4 rounded-full transition-all" style={{ background: "#fff", left: includePlaylists ? "22px" : "2px" }} />
             </button>
           </div>
-        ) : (
-          <div className="card p-5 text-center">
-            <p className="text-[13px] text-t-secondary leading-relaxed mb-4">
-              Connect your Spotify account to analyze your whole library —<br />
-              a one-time setup in Settings.
-            </p>
-            <Link to="/settings" className="btn btn-secondary text-xs">
-              Connect Spotify in Settings →
-            </Link>
-          </div>
-        ))}
-    </div>
-  );
-}
-
-/* ── progress ────────────────────────────────── */
-
-function WorkingCard({ step, source }: { step: "fetching" | "matching"; source: string }) {
-  const fetchProgress = useProgress("fetch_playlist");
-  const spotifyProgress = useProgress("spotify_fetch");
-  const matchProgress = useProgress("match_tracks");
-
-  const p = step === "matching" ? matchProgress : source === "spotify" ? spotifyProgress : fetchProgress;
-  const label =
-    step === "matching"
-      ? "Matching against your library..."
-      : source === "spotify"
-        ? "Fetching your Spotify library..."
-        : "Fetching playlist...";
-
-  return (
-    <div className="max-w-md mx-auto mt-16 text-center">
-      <div className="card p-6 space-y-4">
-        <p className="text-sm font-semibold text-t">{label}</p>
-        <ProgressBar
-          percent={p.percent}
-          sublabel={
-            p.message ||
-            (p.total > 0 ? `${p.current.toLocaleString()} / ${p.total.toLocaleString()}` : undefined)
-          }
-        />
-        {source === "spotify" && step === "fetching" && (
-          <p className="text-[11px] text-t-muted">Large libraries can take a minute or two</p>
-        )}
-      </div>
-    </div>
+          <button onClick={() => runSpotifyGap(includePlaylists)} disabled={!libraryReady} className="btn btn-primary w-full py-2.5">Analyze my library</button>
+        </div>
+      ) : (
+        <div className="card p-5 gf-in text-center">
+          <p className="text-[13px] text-ink2 leading-relaxed mb-4">Connect your Spotify account to analyze your whole library. A one-time setup in Settings.</p>
+          <Link to="/settings" className="btn btn-secondary text-xs">Connect Spotify in Settings →</Link>
+        </div>
+      ))}
+    </>
   );
 }
 
 /* ── results ─────────────────────────────────── */
-
 function Results() {
   const { metadata, matchResults, filter, setFilter, reset } = useGapStore();
   const addToast = useToastStore((s) => s.addToast);
@@ -367,142 +200,116 @@ function Results() {
   const missing = useMemo(() => matchResults.filter(isMissing), [matchResults]);
   const uncertain = useMemo(() => matchResults.filter(isUncertain), [matchResults]);
   const have = matchResults.length - missing.length - uncertain.length;
-
+  const coverage = matchResults.length ? Math.round((have / matchResults.length) * 1000) / 10 : 0;
   const visible = filter === "missing" ? missing : filter === "uncertain" ? uncertain : matchResults;
 
   const copyList = async () => {
-    if (visible.length === 0) return;
+    if (!visible.length) return;
     await navigator.clipboard.writeText(buildTxt(visible));
     addToast("success", `Copied ${visible.length} tracks to clipboard`);
   };
-
   const exportFile = async () => {
-    if (visible.length === 0) return;
+    if (!visible.length) return;
     const base = (metadata?.name ?? "gap-report").replace(/[<>:"/\\|?*]/g, "");
-    const path = await saveDialog({
-      title: "Export Track List",
-      defaultPath: `${base} - ${filter}.csv`,
-      filters: [
-        { name: "CSV", extensions: ["csv"] },
-        { name: "Text", extensions: ["txt"] },
-      ],
-    });
+    const path = await saveDialog({ title: "Export Track List", defaultPath: `${base} - ${filter}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }, { name: "Text", extensions: ["txt"] }] });
     if (!path) return;
-    const content = path.toLowerCase().endsWith(".txt") ? buildTxt(visible) : buildCsv(visible);
-    await rpcCall("write_text_file", { path, content });
+    await rpcCall("write_text_file", { path, content: path.toLowerCase().endsWith(".txt") ? buildTxt(visible) : buildCsv(visible) });
     addToast("success", `Exported ${visible.length} tracks`);
   };
 
-  const filters: { key: GapFilter; label: string; count: number; badge: string }[] = [
-    { key: "missing", label: "Missing", count: missing.length, badge: "badge-err" },
-    { key: "uncertain", label: "Uncertain", count: uncertain.length, badge: "badge-amber" },
-    { key: "all", label: "All", count: matchResults.length, badge: "badge-cyan" },
+  const chips: { key: GapFilter; label: string; count: number }[] = [
+    { key: "missing", label: "Missing", count: missing.length },
+    { key: "uncertain", label: "Uncertain", count: uncertain.length },
+    { key: "all", label: "All", count: matchResults.length },
   ];
 
+  const [skQuery, setSkQuery] = useState<string | null>(null);
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-bold text-t">{metadata?.name ?? "Gap Report"}</h2>
-          <p className="text-sm mt-1">
-            {missing.length > 0 ? (
-              <span className="text-err font-bold">
-                {missing.length} song{missing.length === 1 ? "" : "s"} to find
-              </span>
-            ) : (
-              <span className="text-emerald font-bold">Nothing missing — you have it all 🎉</span>
-            )}
-            <span className="text-t-muted">
-              {" "}· {have} in library{uncertain.length > 0 ? ` · ${uncertain.length} uncertain` : ""}
-            </span>
-          </p>
+    <div className="flex flex-col gap-[18px]">
+      <div className="card gf-in p-[26px] grid gap-[26px]" style={{ gridTemplateColumns: "minmax(0,1fr) minmax(0,320px)" }}>
+        <div className="flex flex-col gap-4 min-w-0">
+          <div className="font-mono text-[9px] tracking-[.18em] text-brand truncate">GAP REPORT · {(metadata?.name ?? "SOURCE").toUpperCase()} → LOCAL</div>
+          <div className="flex items-baseline gap-4 flex-wrap">
+            <div className="font-display font-extrabold leading-[0.82] tracking-[-0.05em] text-ink" style={{ fontSize: "clamp(56px, 7vw, 92px)" }}>{missing.length}</div>
+            <div className="text-[24px] font-semibold tracking-[-0.02em] text-ink2">to find</div>
+          </div>
+          <div className="text-[13px] leading-[1.6] text-ink2 max-w-[460px]">
+            Out of {matchResults.length.toLocaleString()} tracks in <span className="text-ink font-semibold">{metadata?.name ?? "the source"}</span>, {have.toLocaleString()} already exist in your library{uncertain.length ? `, ${uncertain.length} matched under a different filename` : ""}.
+          </div>
+          <div className="flex gap-2 flex-wrap pt-0.5">
+            {chips.map((c) => {
+              const on = filter === c.key;
+              return (
+                <button key={c.key} onClick={() => setFilter(c.key)}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-full text-[12px] font-semibold transition-colors"
+                  style={on ? { background: "var(--ink)", color: "var(--bg)" } : { border: "1px solid var(--line)", color: "var(--ink2)" }}>
+                  {c.label}
+                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded-full" style={on ? { background: "rgba(255,255,255,.18)" } : { background: "var(--panel2)", color: "var(--ink3)" }}>{c.count}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={copyList} disabled={visible.length === 0} className="btn btn-secondary text-xs">
-            Copy List
-          </button>
-          <button onClick={exportFile} disabled={visible.length === 0} className="btn btn-secondary text-xs">
-            Export...
-          </button>
-          <button onClick={reset} className="btn btn-ghost text-xs">
-            New Report
-          </button>
+        <div className="flex flex-col gap-3.5 pl-[26px] border-l border-line min-w-0">
+          <div className="font-mono text-[9px] tracking-[.14em] text-ink3">SOURCE</div>
+          <div className="text-[13px] font-semibold truncate text-ink">{metadata?.name ?? "Gap Report"}</div>
+          <div className="font-mono text-[9px] text-ink3">{matchResults.length.toLocaleString()} TRACKS</div>
+          <div className="h-px" style={{ background: "var(--line)" }} />
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--line)" }}>
+              <div className="h-full rounded-full" style={{ width: `${coverage}%`, background: "var(--emer)" }} />
+            </div>
+            <div className="font-mono text-[9px] text-ink2">{coverage}%</div>
+          </div>
+          <div className="font-mono text-[9px] text-ink3">COVERAGE OF SOURCE</div>
+          <div className="flex-1" />
+          <div className="flex gap-2">
+            <button onClick={copyList} disabled={!visible.length} className="btn btn-secondary flex-1 text-[12px] py-2">Copy list</button>
+            <button onClick={exportFile} disabled={!visible.length} className="btn btn-secondary flex-1 text-[12px] py-2">Export</button>
+          </div>
+          <button onClick={reset} className="btn btn-primary text-[12px] py-2.5">New report</button>
         </div>
       </div>
 
-      {/* Filter chips */}
-      <div className="flex gap-2">
-        {filters.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
-              filter === f.key ? "bg-bg-hover text-t ring-1 ring-white/10" : "text-t-secondary hover:bg-bg-hover"
-            }`}
-          >
-            {f.label}
-            <span className={`badge ${f.badge} text-[9px]`}>{f.count}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Track rows */}
-      <div className="card overflow-hidden">
-        <div className="max-h-[calc(100vh-330px)] overflow-y-auto">
+      <div className="card overflow-hidden gf-in">
+        <div className="grid gap-3.5 px-5 py-3 border-b border-line panel2 font-mono text-[8px] font-semibold tracking-[.14em] text-ink3" style={{ gridTemplateColumns: "34px minmax(0,1.15fr) minmax(0,.9fr) minmax(0,.8fr) minmax(0,1fr)" }}>
+          <div></div><div>TRACK</div><div>ARTIST</div><div>ALBUM</div><div>LOCAL MATCH</div>
+        </div>
+        <div className="max-h-[46vh] overflow-y-auto">
           {visible.length === 0 ? (
-            <p className="text-center text-[13px] text-t-muted py-10">
-              {filter === "missing" ? "No missing tracks in this report." : "Nothing in this bucket."}
-            </p>
-          ) : (
-            visible.map((r, i) => <GapRow key={i} result={r} />)
-          )}
+            <p className="text-center text-[13px] text-ink3 py-10">{filter === "missing" ? "No missing tracks in this report." : "Nothing in this bucket."}</p>
+          ) : visible.map((r, i) => <GapRow key={i} result={r} onFind={setSkQuery} />)}
+        </div>
+        <div className="px-5 py-3 flex items-center gap-3 font-mono text-[9px] text-ink3">
+          <div>SHOWING {visible.length} OF {matchResults.length}</div>
+          <div className="flex-1" />
         </div>
       </div>
+
+      {skQuery !== null && <SoulseekSearchModal initialQuery={skQuery} onClose={() => setSkQuery(null)} />}
     </div>
   );
 }
 
-function GapRow({ result }: { result: MatchResult }) {
+function GapRow({ result, onFind }: { result: MatchResult; onFind: (q: string) => void }) {
   const pt = result.playlist_track;
   const lt = result.best_match?.local_track;
-  const missing = isMissing(result);
-  const uncertain = isUncertain(result);
-
+  const tone = isMissing(result) ? "err" : isUncertain(result) ? "amber" : "emer";
+  const badge = isMissing(result) ? "MISSING" : isUncertain(result) ? "UNCERTAIN" : "MATCHED";
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-b-[rgba(255,255,255,0.04)] last:border-b-0 hover:bg-bg-hover/40 transition-colors">
-      <div
-        className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${
-          missing ? "bg-err-muted text-err" : uncertain ? "bg-amber-muted text-amber" : "bg-ok-muted text-ok"
-        }`}
-      >
-        {missing ? (
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        ) : uncertain ? (
-          <span className="text-[11px] font-bold">?</span>
-        ) : (
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-          </svg>
+    <div className="grid gap-3.5 items-center px-5 py-[11px] border-b border-line2 text-[13px] transition-colors hover:bg-panel2" style={{ gridTemplateColumns: "34px minmax(0,1.15fr) minmax(0,.9fr) minmax(0,.8fr) minmax(0,1fr)" }}>
+      <div className="w-[7px] h-[7px] rounded-full" style={{ background: `var(--${tone})` }} />
+      <div className="font-medium truncate text-ink">{pt.title}</div>
+      <div className="text-ink2 truncate">{pt.artist}</div>
+      <div className="text-ink3 truncate">{pt.album}</div>
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={`badge badge-${tone === "emer" ? "emerald" : tone}`}>{badge}</span>
+        <span className="font-mono text-[9px] text-ink3 truncate">{lt ? `${lt.artist} - ${lt.title}` : "NOT IN LIBRARY"}</span>
+        {isMissing(result) && (
+          <button onClick={() => onFind(`${pt.artist} ${pt.title}`)} title="Find on Soulseek" className="ml-auto shrink-0 font-mono text-[9px] font-bold text-brand hover:opacity-80 transition-opacity">FIND ↗</button>
         )}
       </div>
-
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] text-t truncate">
-          <span className="font-semibold">{pt.artist}</span>
-          <span className="text-t-muted"> — </span>
-          {pt.title}
-        </p>
-        {uncertain && lt && (
-          <p className="text-[11px] text-amber/80 truncate">
-            Maybe: {lt.artist} — {lt.title} ({Math.round(result.best_match!.score)}%)
-          </p>
-        )}
-      </div>
-
-      {pt.album && <p className="text-[11px] text-t-muted truncate max-w-[200px] shrink-0">{pt.album}</p>}
     </div>
   );
 }

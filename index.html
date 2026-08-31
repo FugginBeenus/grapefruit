@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Grapefruit</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("grapefruit:theme") === "light" ? "light" : "dark";
+          document.documentElement.classList.add(t === "light" ? "gf-light" : "gf-dark");
+        } catch (e) {
+          document.documentElement.classList.add("gf-dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

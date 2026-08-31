@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDeviceStore } from "../stores/deviceStore";
+import { usePlexStore } from "../stores/plexStore";
 import { rpcCall } from "../api/sidecar";
-import { readPlaylist, writePlaylist, deletePlaylist } from "../api/library";
-import { plexSyncPlaylists } from "../api/plex";
+import { readPlaylist, writePlaylist, deletePlaylist, getIpodPlaylists, readIpodPlaylist, writeIpodPlaylist } from "../api/library";
+import { plexSyncPlaylists, plexListPlaylists } from "../api/plex";
+import { spotifyListPlaylists } from "../api/spotify";
 import { SearchInput } from "../components/SearchInput";
 import type { DeviceTrack, PlaylistInfo } from "../types/models";
 
@@ -46,10 +48,68 @@ function downloadBlob(content: string, filename: string) {
 export default function Playlists() {
   const { name: routeName } = useParams<{ name: string }>();
   const navigate = useNavigate();
-  const { selectedDevice, tracks: libraryTracks, playlists, refreshPlaylists } = useDeviceStore();
+  const { selectedDevice, ipod, tracks: libraryTracks, playlists, refreshPlaylists } = useDeviceStore();
+  const plexConnected = usePlexStore((s) => s.connected);
+
+  const [ipodPls, setIpodPls] = useState<PlaylistInfo[]>([]);
+  useEffect(() => {
+    if (ipod) getIpodPlaylists().then(setIpodPls).catch(() => setIpodPls([]));
+    else setIpodPls([]);
+  }, [ipod]);
 
   const decoded = routeName ? decodeURIComponent(routeName) : null;
   const activePlaylist = playlists.find((p) => p.name === decoded) ?? null;
+
+  // Cross-reference each local playlist against Plex so we can tag its sync
+  // state. name (lowercased) -> Plex track count.
+  const [plexPls, setPlexPls] = useState<{ title: string; leafCount: number }[]>([]);
+  const [spotPls, setSpotPls] = useState<{ name: string; track_count: number }[]>([]);
+  useEffect(() => {
+    if (plexConnected) plexListPlaylists().then(setPlexPls).catch(() => setPlexPls([]));
+    else setPlexPls([]);
+    spotifyListPlaylists().then(setSpotPls).catch(() => setSpotPls([]));
+  }, [plexConnected]);
+  const plexMap = useMemo(() => new Map(plexPls.map((p) => [p.title.toLowerCase(), p.leafCount])), [plexPls]);
+
+  const plexStatus = useCallback((name: string, trackCount: number): { label: string; tone: string } | null => {
+    if (!plexConnected) return null;
+    const leaf = plexMap.get(name.toLowerCase());
+    if (leaf === undefined) return { label: "Not on Plex", tone: "ink3" };
+    return leaf === trackCount ? { label: "Synced with Plex", tone: "emer" } : { label: "Out of sync with Plex", tone: "amber" };
+  }, [plexConnected, plexMap]);
+
+  // Pool playlists from every source, deduped by name, tagged by location.
+  interface Pooled { name: string; local: PlaylistInfo | null; device: PlaylistInfo | null; plex: number | null; spotify: number | null }
+  const [remoteView, setRemoteView] = useState<Pooled | null>(null);
+  const pooled = useMemo<Pooled[]>(() => {
+    const map = new Map<string, Pooled>();
+    const put = (name: string) => {
+      const k = name.toLowerCase();
+      let e = map.get(k);
+      if (!e) { e = { name, local: null, device: null, plex: null, spotify: null }; map.set(k, e); }
+      return e;
+    };
+    for (const p of playlists) put(p.name).local = p;
+    for (const p of ipodPls) put(p.name).device = p;
+    for (const p of plexPls) put(p.title).plex = p.leafCount;
+    for (const p of spotPls) put(p.name).spotify = p.track_count;
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [playlists, ipodPls, plexPls, spotPls]);
+
+  // When a device-only (iPod) playlist is opened, load its tracks read-only.
+  const [remoteTracks, setRemoteTracks] = useState<DeviceTrack[]>([]);
+  const [loadingRemote, setLoadingRemote] = useState(false);
+  useEffect(() => {
+    if (remoteView?.device) {
+      setLoadingRemote(true);
+      readIpodPlaylist(remoteView.device.path)
+        .then(setRemoteTracks)
+        .catch(() => setRemoteTracks([]))
+        .finally(() => setLoadingRemote(false));
+    } else {
+      setRemoteTracks([]);
+    }
+  }, [remoteView]);
 
   const [detailTracks, setDetailTracks] = useState<DeviceTrack[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -81,11 +141,11 @@ export default function Playlists() {
 
   useEffect(() => { if (renaming) renameRef.current?.focus(); }, [renaming]);
 
-  const filteredPlaylists = useMemo(() => {
-    if (!sideSearch.trim()) return playlists;
+  const filteredPooled = useMemo(() => {
+    if (!sideSearch.trim()) return pooled;
     const q = sideSearch.toLowerCase();
-    return playlists.filter((p) => p.name.toLowerCase().includes(q));
-  }, [playlists, sideSearch]);
+    return pooled.filter((p) => p.name.toLowerCase().includes(q));
+  }, [pooled, sideSearch]);
 
   const addCandidates = useMemo(() => {
     if (!addSearch.trim()) return libraryTracks;
@@ -170,6 +230,40 @@ export default function Playlists() {
     }
   };
 
+  const handleSyncIpod = async () => {
+    if (!activePlaylist) return;
+    setPushing(true);
+    setMsg(null);
+    try {
+      const res = await writeIpodPlaylist(activePlaylist.name, detailTracks.map((t) => t.relative_path));
+      setMsg({
+        text: `Synced to iPod · ${res.count} tracks${res.copied ? `, ${res.copied} copied over` : ""}${res.errors.length ? `, ${res.errors.length} failed` : ""}`,
+        ok: res.errors.length === 0,
+      });
+      getIpodPlaylists().then(setIpodPls).catch(() => {});
+    } catch (e) {
+      setMsg({ text: `Sync to iPod failed: ${e}`, ok: false });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const importRemote = async () => {
+    if (!remoteView) return;
+    setPushing(true);
+    try {
+      await writePlaylist(remoteView.name, remoteTracks.map((t) => t.relative_path));
+      await refreshPlaylists();
+      const name = remoteView.name;
+      setRemoteView(null);
+      navigate(`/playlists/${encodeURIComponent(name)}`);
+    } catch (e) {
+      setMsg({ text: `Import failed: ${e}`, ok: false });
+    } finally {
+      setPushing(false);
+    }
+  };
+
   const handleExport = () => {
     if (!activePlaylist || detailTracks.length === 0) return;
     downloadBlob(buildM3U(activePlaylist.name, detailTracks), `${activePlaylist.name}.m3u`);
@@ -227,18 +321,16 @@ export default function Playlists() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-80px)]">
-      {/* Sidebar */}
-      <div className="w-[260px] shrink-0 border-r flex flex-col" style={{ background: "linear-gradient(180deg, #12121A 0%, #0B0B10 100%)" }}>
-        <div className="p-4 flex items-center justify-between border-b">
-          <span className="text-sm font-semibold text-t">Playlists</span>
-          <button onClick={() => setCreatingNew(true)} className="btn btn-primary text-[11px] py-1 px-3 rounded-full">
-            New
-          </button>
+    <div className="grid gap-[18px] h-[calc(100vh-155px)] min-h-[480px] max-w-[1600px]" style={{ gridTemplateColumns: "280px minmax(0,1fr)" }}>
+      {/* Master list */}
+      <div className="flex flex-col overflow-hidden rounded-2xl border border-line bg-panel" style={{ boxShadow: "var(--shadow)" }}>
+        <div className="px-4 py-3.5 flex items-center justify-between border-b border-line shrink-0">
+          <div className="font-mono text-[9px] tracking-[.16em] text-ink3">PLAYLISTS · {playlists.length}</div>
+          <button onClick={() => setCreatingNew(true)} className="btn btn-primary text-[11px] py-1 px-3">New</button>
         </div>
 
         {creatingNew && (
-          <div className="px-3 pt-3">
+          <div className="px-3 pt-3 shrink-0">
             <input
               type="text"
               value={newName}
@@ -247,39 +339,45 @@ export default function Playlists() {
                 if (e.key === "Enter") handleCreate();
                 if (e.key === "Escape") { setCreatingNew(false); setNewName(""); }
               }}
-              placeholder="Playlist name..."
+              placeholder="Playlist name"
               className="input text-[12px] py-2"
               autoFocus
             />
           </div>
         )}
 
-        <div className="px-3 pt-3">
-          <SearchInput value={sideSearch} onChange={setSideSearch} placeholder="Filter playlists..." />
+        <div className="px-3 pt-3 shrink-0">
+          <SearchInput value={sideSearch} onChange={setSideSearch} placeholder="Filter playlists" />
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto mt-2 px-1">
-          {filteredPlaylists.length === 0 ? (
-            <p className="text-t-muted text-[12px] text-center mt-8">
-              {playlists.length === 0 ? "No playlists yet" : "No matches"}
+        <div className="flex-1 min-h-0 overflow-y-auto mt-2 px-2 pb-2">
+          {filteredPooled.length === 0 ? (
+            <p className="text-ink3 text-[12px] text-center mt-8">
+              {pooled.length === 0 ? "No playlists yet" : "No matches"}
             </p>
           ) : (
-            filteredPlaylists.map((p) => {
-              const active = activePlaylist?.name === p.name;
+            filteredPooled.map((p) => {
+              const active = activePlaylist?.name === p.name || remoteView?.name === p.name;
+              const count = p.local?.track_count ?? p.device?.track_count ?? p.plex ?? p.spotify ?? 0;
+              const srcs: { label: string; tone: string }[] = [];
+              if (p.local) srcs.push({ label: "LIB", tone: "brand" });
+              if (p.device) srcs.push({ label: "DEV", tone: "cyan" });
+              if (p.plex !== null) srcs.push({ label: "PLEX", tone: "amber" });
+              if (p.spotify !== null) srcs.push({ label: "SPOT", tone: "emer" });
               return (
                 <button
                   key={p.name}
-                  onClick={() => selectPlaylist(p)}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg mb-0.5 flex items-center justify-between transition-colors ${
-                    active ? "bg-gf-glow border-l-[3px] border-gf" : "hover:bg-bg-hover"
-                  }`}
+                  onClick={() => { if (p.local) { setRemoteView(null); selectPlaylist(p.local); } else { setRemoteView(p); navigate("/playlists"); } }}
+                  className="w-full text-left px-3 py-2 rounded-xl mb-0.5 flex flex-col gap-1 transition-colors hover:bg-panel2"
+                  style={active ? { background: "var(--violetS)", boxShadow: "inset 2px 0 0 var(--violet)" } : undefined}
                 >
-                  <span className={`text-[13px] font-medium truncate ${active ? "text-gf" : "text-t-secondary"}`}>
-                    {p.name}
-                  </span>
-                  <span className="text-xs text-t-muted tabular-nums shrink-0 ml-2">
-                    {p.track_count}
-                  </span>
+                  <div className="flex items-center w-full">
+                    <span className="text-[13px] font-medium truncate flex-1 min-w-0" style={{ color: active ? "var(--violet)" : "var(--ink2)" }}>{p.name}</span>
+                    <span className="font-mono text-[10px] text-ink3 tabular-nums shrink-0 ml-2">{count}</span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {srcs.map((s) => <span key={s.label} className="font-mono text-[7px] font-semibold tracking-[.06em] px-1 py-[2px] rounded" style={{ background: `var(--${s.tone}S)`, color: `var(--${s.tone})` }}>{s.label}</span>)}
+                  </div>
                 </button>
               );
             })
@@ -288,16 +386,64 @@ export default function Playlists() {
       </div>
 
       {/* Detail panel */}
-      <div className="flex-1 min-w-0 flex flex-col p-6 overflow-y-auto">
+      <div className="flex flex-col min-w-0 p-5 overflow-y-auto rounded-2xl border border-line bg-panel" style={{ boxShadow: "var(--shadow)" }}>
         {!activePlaylist ? (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-bg-surface flex items-center justify-center">
-              <svg className="w-6 h-6 text-t-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
-              </svg>
+          remoteView ? (
+            <div className="flex flex-col gap-4">
+              <div>
+                <h2 className="font-display text-xl font-bold text-ink">{remoteView.name}</h2>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  {remoteView.local && <span className="badge" style={{ background: "var(--brandS)", color: "var(--brand)" }}>Library</span>}
+                  {remoteView.device && <span className="badge" style={{ background: "var(--cyanS)", color: "var(--cyan)" }}>iPod · {remoteView.device.track_count} tracks</span>}
+                  {remoteView.plex !== null && <span className="badge" style={{ background: "var(--amberS)", color: "var(--amber)" }}>Plex · {remoteView.plex} tracks</span>}
+                  {remoteView.spotify !== null && <span className="badge" style={{ background: "var(--emerS)", color: "var(--emer)" }}>Spotify · {remoteView.spotify} tracks</span>}
+                </div>
+              </div>
+
+              {remoteView.device ? (
+                <div className="rounded-xl border border-line overflow-hidden">
+                  <div className="px-4 py-2.5 panel2 border-b border-line font-mono text-[8px] font-semibold tracking-[.14em] text-ink3">
+                    ON IPOD · {loadingRemote ? "LOADING…" : `${remoteTracks.length} TRACKS`}
+                  </div>
+                  <div className="max-h-[52vh] overflow-y-auto">
+                    {remoteTracks.map((t, i) => (
+                      <div key={i} className="flex items-center gap-3 px-4 py-2 border-b border-line2 last:border-0">
+                        <span className="font-mono text-[10px] text-ink3 tabular-nums w-6 text-right shrink-0">{i + 1}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12px] text-ink truncate">{t.title || "Unknown"}</div>
+                          {t.artist && <div className="font-mono text-[9px] text-ink3 truncate">{t.artist}</div>}
+                        </div>
+                        {t.format && <span className="font-mono text-[8px] text-ink3 uppercase shrink-0">{t.format}</span>}
+                      </div>
+                    ))}
+                    {!loadingRemote && remoteTracks.length === 0 && <div className="px-4 py-6 text-[12px] text-ink3 text-center">Couldn't read this playlist's tracks.</div>}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[13px] text-ink2 leading-relaxed max-w-[460px]">
+                  This playlist lives on {[remoteView.plex !== null ? "Plex" : null, remoteView.spotify !== null ? "Spotify" : null].filter(Boolean).join(" and ") || "another source"}, but not in your library yet. Import it to edit it and sync it everywhere.
+                </p>
+              )}
+
+              <div className="flex items-center gap-2.5">
+                {remoteView.device ? (
+                  <button onClick={importRemote} disabled={pushing || remoteTracks.length === 0} className="btn btn-primary text-xs">{pushing ? "Importing…" : "Import to library"}</button>
+                ) : (
+                  <button onClick={() => navigate("/import")} className="btn btn-secondary text-xs">Import to library</button>
+                )}
+                <span className="font-mono text-[9px] text-ink3">Edit it in the library, then sync anywhere</span>
+              </div>
             </div>
-            <p className="text-t-secondary text-sm">Select a playlist from the sidebar, or create a new one</p>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-bg-surface flex items-center justify-center">
+                <svg className="w-6 h-6 text-t-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+                </svg>
+              </div>
+              <p className="text-t-secondary text-sm">Select a playlist from the sidebar, or create a new one</p>
+            </div>
+          )
         ) : (
           <>
             {/* Playlist header */}
@@ -332,6 +478,12 @@ export default function Playlists() {
                     <>
                       <span className="badge badge-violet">{detailTracks.length} tracks</span>
                       {formatTotalDuration(detailTracks) && <span className="badge badge-cyan">{formatTotalDuration(detailTracks)}</span>}
+                      <span className="badge" style={{ background: "var(--panel2)", color: "var(--ink2)" }}>Local</span>
+                      {(() => {
+                        const s = plexStatus(activePlaylist.name, activePlaylist.track_count);
+                        if (!s) return null;
+                        return <span className="badge" style={s.tone === "ink3" ? { background: "var(--panel2)", color: "var(--ink3)" } : { background: `var(--${s.tone}S)`, color: `var(--${s.tone})` }}>{s.label}</span>;
+                      })()}
                     </>
                   )}
                 </div>
@@ -341,6 +493,11 @@ export default function Playlists() {
                   <button onClick={handleSaveOrder} className="btn btn-primary text-xs">Save Changes</button>
                 )}
                 <button onClick={handleExport} disabled={detailTracks.length === 0} className="btn btn-secondary text-xs">Export M3U</button>
+                {ipod && (
+                  <button onClick={handleSyncIpod} disabled={pushing || detailTracks.length === 0} className="btn btn-secondary text-xs">
+                    {pushing ? "Syncing..." : "Sync to iPod"}
+                  </button>
+                )}
                 <button onClick={handlePush} disabled={pushing || detailTracks.length === 0} className="btn btn-secondary text-xs">
                   {pushing ? "Pushing..." : "Push to Plex"}
                 </button>
@@ -426,63 +583,38 @@ export default function Playlists() {
                   <button onClick={() => setShowAddPanel(true)} className="btn btn-secondary text-xs">Add Tracks</button>
                 </div>
               ) : (
-                <div className="card overflow-hidden flex flex-col">
-                  <div className="flex items-center gap-2 px-4 py-2.5 border-b bg-bg-surface text-[11px] font-semibold text-t-muted uppercase tracking-wide shrink-0">
-                    <span className="w-8 text-right">#</span>
-                    <span className="flex-1">Title</span>
-                    <span className="w-14 text-right">Time</span>
-                    <span className="w-20" />
+                <div className="overflow-hidden flex flex-col rounded-xl border border-line">
+                  <div className="grid gap-3 items-center px-4 py-2.5 panel2 border-b border-line font-mono text-[8px] font-semibold tracking-[.14em] text-ink3 shrink-0" style={{ gridTemplateColumns: "32px minmax(0,1.6fr) minmax(0,1fr) 56px 72px" }}>
+                    <span>#</span><span>TITLE</span><span>ARTIST</span><span className="text-right">TIME</span><span />
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto">
                     {detailTracks.map((track, index) => (
                       <div
                         key={`${track.relative_path}-${index}`}
-                        className="group flex items-center gap-2 px-4 py-2.5 border-b border-b-[rgba(255,255,255,0.06)] hover:bg-bg-hover transition-colors"
+                        className="group grid gap-3 items-center px-4 py-2.5 border-b border-line2 hover:bg-panel2 transition-colors"
+                        style={{ gridTemplateColumns: "32px minmax(0,1.6fr) minmax(0,1fr) 56px 72px" }}
                       >
-                        <span className="w-8 text-right text-t-muted text-[11px] tabular-nums shrink-0">{index + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="truncate text-[13px] font-medium text-t">{track.title || "Unknown Title"}</p>
-                          <p className="truncate text-[11px] text-t-muted">
-                            {track.artist || "Unknown Artist"}{track.album ? ` \u2014 ${track.album}` : ""}
-                          </p>
-                        </div>
-                        <span className="w-14 text-right text-t-muted text-[11px] tabular-nums shrink-0">{fmtDur(track.duration_seconds)}</span>
-                        <div className="w-20 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                          <button
-                            onClick={() => moveTrack(index, -1)}
-                            disabled={index === 0}
-                            className="p-1 rounded hover:bg-bg-surface text-t-muted hover:text-t disabled:opacity-20 transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-                            </svg>
+                        <span className="font-mono text-[10px] text-ink3 tabular-nums">{index + 1}</span>
+                        <div className="min-w-0"><p className="truncate text-[13px] font-medium text-ink">{track.title || "Unknown Title"}</p></div>
+                        <span className="truncate text-[12px] text-ink2">{track.artist || "Unknown Artist"}{track.album ? ` \u00b7 ${track.album}` : ""}</span>
+                        <span className="text-right font-mono text-[10px] text-ink2 tabular-nums">{fmtDur(track.duration_seconds)}</span>
+                        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => moveTrack(index, -1)} disabled={index === 0} className="p-1 rounded-md hover:bg-panel text-ink3 hover:text-ink disabled:opacity-20 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" /></svg>
                           </button>
-                          <button
-                            onClick={() => moveTrack(index, 1)}
-                            disabled={index === detailTracks.length - 1}
-                            className="p-1 rounded hover:bg-bg-surface text-t-muted hover:text-t disabled:opacity-20 transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                            </svg>
+                          <button onClick={() => moveTrack(index, 1)} disabled={index === detailTracks.length - 1} className="p-1 rounded-md hover:bg-panel text-ink3 hover:text-ink disabled:opacity-20 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                           </button>
-                          <button
-                            onClick={() => removeTrack(index)}
-                            className="p-1 rounded hover:bg-err-muted text-t-muted hover:text-err transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
+                          <button onClick={() => removeTrack(index)} className="p-1 rounded-md text-ink3 hover:text-err transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                           </button>
                         </div>
                       </div>
                     ))}
                   </div>
-                  {/* Bottom bar */}
-                  <div className="flex items-center justify-between px-4 py-3 border-t border-b bg-bg-surface">
-                    <button onClick={() => setShowAddPanel((v) => !v)} className="btn btn-ghost text-xs text-gf">
-                      + Add Tracks
-                    </button>
+                  <div className="flex items-center justify-between px-4 py-3 panel2 border-t border-line shrink-0">
+                    <button onClick={() => setShowAddPanel((v) => !v)} className="text-[12px] font-bold text-brand hover:opacity-80 transition-opacity">+ Add tracks</button>
+                    {orderDirty && <span className="font-mono text-[9px]" style={{ color: "var(--amber)" }}>UNSAVED ORDER</span>}
                   </div>
                 </div>
               )}

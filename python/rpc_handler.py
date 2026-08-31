@@ -44,6 +44,7 @@ class RpcHandler:
         self._notify = notify_fn
         self._session = Session()
         self._spotify_flow = None  # in-flight OAuth flow, if any
+        self._src_cache = {}       # source index cache for location pooling
 
     def dispatch(self, method: str, params: dict):
         """Route a method name to its handler and return the result."""
@@ -120,6 +121,77 @@ class RpcHandler:
             "free_bytes": usage.free,
         }
 
+    def _rpc_set_device_manual(self, params: dict):
+        """Connect a device by an explicit mount path — the manual fallback for
+        when auto-detection misses an iPod (e.g. blocked removable-volume
+        permission, or a volume without the expected marker folders)."""
+        from core.models import DeviceFirmware
+        _require(params, "path")
+        mount_path = Path(params["path"])
+        if not mount_path.exists():
+            raise ValueError(f"Path does not exist: {params['path']}")
+        if not mount_path.is_dir():
+            raise ValueError(f"Path is not a directory: {params['path']}")
+
+        firmware = self._get_device_firmware(mount_path)
+        import shutil as _shutil
+        usage = _shutil.disk_usage(str(mount_path))
+
+        with self._session._lock:
+            self._session.device_mount = mount_path
+            self._session.rockbox_library = None
+            self._session.device_tracks = []
+
+        return {
+            "mount_point": str(mount_path),
+            "label": mount_path.name,
+            "model": "iPod" if firmware != DeviceFirmware.UNKNOWN else "Device",
+            "firmware": firmware.value,
+            "capacity_bytes": usage.total,
+            "used_bytes": usage.used,
+            "free_bytes": usage.free,
+        }
+
+    def _rpc_set_ipod(self, params: dict):
+        """Connect a secondary iPod — a separate sync target that coexists with
+        the library. Caches its filenames (fast, no tag reads) so its tracks can
+        be tagged 'on device' and it can be synced to, without disturbing the
+        connected library."""
+        from core.models import DeviceFirmware
+        from core.location_cache import save_device_index
+        _require(params, "path")
+        mount_path = Path(params["path"])
+        if not mount_path.exists():
+            raise ValueError(f"Path does not exist: {params['path']}")
+        if not mount_path.is_dir():
+            raise ValueError(f"Path is not a directory: {params['path']}")
+
+        firmware = self._get_device_firmware(mount_path)
+        import shutil as _shutil
+        usage = _shutil.disk_usage(str(mount_path))
+
+        with self._session._lock:
+            self._session.ipod_mount = mount_path
+
+        try:
+            save_device_index(self._folder_basenames(str(mount_path)), label=mount_path.name)
+        except Exception:
+            pass
+
+        return {
+            "mount_point": str(mount_path),
+            "label": mount_path.name,
+            "model": "iPod" if firmware != DeviceFirmware.UNKNOWN else "Device",
+            "firmware": firmware.value,
+            "capacity_bytes": usage.total,
+            "used_bytes": usage.used,
+            "free_bytes": usage.free,
+        }
+
+    def _rpc_clear_ipod(self, params: dict):
+        self._session.clear_ipod()
+        return {"ok": True}
+
     def _rpc_clear_device(self, params: dict):
         self._session.clear_device()
         return {"ok": True}
@@ -150,6 +222,18 @@ class RpcHandler:
         tracks = library.scan_music(progress_callback=progress)
         with self._session._lock:
             self._session.device_tracks = tracks
+
+        # If this target is a device (not a plain library folder), remember its
+        # contents so tracks can be tagged 'on device' even when it's unplugged.
+        try:
+            dm = self._session.device_mount
+            if dm and ((dm / ".rockbox").exists() or (dm / "iPod_Control").exists()):
+                from core.location_cache import save_device_index
+                names = {os.path.basename(t.relative_path).lower() for t in tracks}
+                save_device_index(names, label=dm.name)
+        except Exception:
+            pass
+
         return _serialize(tracks)
 
     def _rpc_get_playlists(self, params: dict):
@@ -167,6 +251,50 @@ class RpcHandler:
                 "track_count": len(track_paths),
             })
         return result
+
+    def _rpc_get_ipod_playlists(self, params: dict):
+        """Read playlists (M3U/M3U8) on the connected iPod, separate from the
+        library. [] when no iPod is connected."""
+        if not self._session.ipod_mount:
+            return []
+        from core.rockbox_library import RockboxLibrary
+        lib = RockboxLibrary(self._session.ipod_mount)
+        result = []
+        for name, path in lib.get_playlists():
+            track_paths = lib.read_playlist(path)
+            result.append({"name": name, "path": str(path), "track_count": len(track_paths)})
+        return result
+
+    def _rpc_read_ipod_playlist(self, params: dict):
+        """Read the tracks of a playlist that lives on the iPod. Resolves each
+        entry against the library's metadata when possible, else shows the
+        filename."""
+        _require(params, "path")
+        if not self._session.ipod_mount:
+            raise ValueError("No iPod connected")
+        from core.rockbox_library import RockboxLibrary
+        lib = RockboxLibrary(self._session.ipod_mount)
+        track_paths = lib.read_playlist(Path(params["path"]))
+
+        dt_by_path = {}
+        for dt in self._session.device_tracks:
+            dt_by_path[dt.relative_path.lower()] = dt
+            dt_by_path[dt.relative_path.replace("\\", "/").lower()] = dt
+
+        tracks = []
+        for tp in track_paths:
+            dt = dt_by_path.get(tp.lstrip("/").lower())
+            if dt:
+                tracks.append(_serialize(dt))
+            else:
+                name = os.path.basename(tp)
+                tracks.append({
+                    "file_path": tp, "relative_path": tp, "title": name,
+                    "artist": "", "album": "", "duration_seconds": None,
+                    "track_number": None, "file_size": 0,
+                    "format": os.path.splitext(name)[1].lstrip(".").lower(),
+                })
+        return tracks
 
     def _rpc_read_playlist(self, params: dict):
         _require(params, "path")
@@ -220,6 +348,60 @@ class RpcHandler:
 
         output_path = library.write_playlist(name, tracks)
         return {"path": str(output_path), "count": len(tracks)}
+
+    def _rpc_write_ipod_playlist(self, params: dict):
+        """Sync a playlist onto the iPod: copy any of its song files the iPod is
+        missing (so the playlist never points at absent tracks), then write the
+        M3U8. Track paths are resolved against the library for the files."""
+        _require(params, "name")
+        if not self._session.ipod_mount:
+            raise ValueError("No iPod connected")
+        from core.rockbox_library import RockboxLibrary
+        from core.file_copier import FileCopier
+        ipod = self._session.ipod_mount
+        lib = RockboxLibrary(ipod)
+        name = params["name"]
+        track_paths = params.get("track_paths", [])
+
+        def norm(p):
+            return str(p).replace("\\", "/").lstrip("/").lower()
+
+        dt_by_path = {}
+        for dt in self._session.device_tracks:
+            dt_by_path[norm(dt.file_path)] = dt
+            dt_by_path[norm(dt.relative_path)] = dt
+
+        tracks = []
+        for tp in track_paths:
+            dt = dt_by_path.get(norm(tp))
+            if dt:
+                tracks.append(dt)
+
+        # Copy any missing song files to the iPod, mirroring the library's
+        # relative layout (which is what the M3U8 references).
+        copier = FileCopier()
+        copied = 0
+        errors = []
+        total = len(tracks)
+        for i, dt in enumerate(tracks):
+            src = Path(dt.file_path)
+            dst = ipod / dt.relative_path
+            try:
+                if not dst.exists() and src.exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    if copier.copy_with_progress(src, dst):
+                        copied += 1
+                    else:
+                        errors.append(dt.relative_path)
+            except OSError as e:
+                errors.append(f"{dt.relative_path}: {e}")
+            self._notify("progress", {
+                "op": "sync_playlist_ipod", "current": i + 1, "total": total,
+                "message": f"Copying tracks {i + 1}/{total}",
+            })
+
+        output_path = lib.write_playlist(name, tracks)
+        return {"path": str(output_path), "count": len(tracks), "copied": copied, "errors": errors}
 
     def _rpc_delete_playlist(self, params: dict):
         _require(params, "path")
@@ -333,10 +515,11 @@ class RpcHandler:
     # ── Sync Engine ────────────────────────────────────────────────
 
     def _rpc_compute_sync_plan(self, params: dict):
-        """Compute a sync plan comparing local folder(s) to device."""
+        """Compute a sync plan comparing the library to the connected device."""
         _require(params, "source_paths")
-        if not self._session.device_mount:
-            raise ValueError("No device connected")
+        mount = self._sync_target()
+        if not mount:
+            raise ValueError("Connect a device (iPod) in the sidebar to sync to.")
 
         from core.models import SyncMode, DeviceInfo
         from core.sync_engine import SyncEngine
@@ -353,8 +536,6 @@ class RpcHandler:
         except ValueError:
             raise ValueError(f"Invalid sync mode: {mode_str}. Use: full, selective, or delta")
 
-        # Build DeviceInfo from current mount
-        mount = self._session.device_mount
         import shutil as _shutil
         usage = _shutil.disk_usage(str(mount))
         device_info = DeviceInfo(
@@ -395,8 +576,9 @@ class RpcHandler:
     def _rpc_execute_sync(self, params: dict):
         """Execute a previously computed sync plan."""
         _require(params, "source_paths")
-        if not self._session.device_mount:
-            raise ValueError("No device connected")
+        mount = self._sync_target()
+        if not mount:
+            raise ValueError("Connect a device (iPod) in the sidebar to sync to.")
 
         from core.models import SyncMode, SyncPlan, DeviceInfo
         from core.sync_engine import SyncEngine
@@ -406,7 +588,6 @@ class RpcHandler:
         copy_paths = [Path(p) for p in params.get("copy_paths", [])]
         delete_paths = [Path(p) for p in params.get("delete_paths", [])]
 
-        mount = self._session.device_mount
         import shutil as _shutil
         usage = _shutil.disk_usage(str(mount))
         device_info = DeviceInfo(
@@ -453,6 +634,17 @@ class RpcHandler:
         if (mount / "iPod_Control").exists():
             return DeviceFirmware.APPLE
         return DeviceFirmware.UNKNOWN
+
+    def _sync_target(self):
+        """The device to sync TO: the secondary iPod if connected, else the
+        primary connection when it is itself a device (iPod-only setups)."""
+        s = self._session
+        if s.ipod_mount:
+            return s.ipod_mount
+        dm = s.device_mount
+        if dm and ((dm / ".rockbox").exists() or (dm / "iPod_Control").exists()):
+            return dm
+        return None
 
     # ── Plex ────────────────────────────────────────────────────────
 
@@ -607,6 +799,192 @@ class RpcHandler:
         })
 
         return results
+
+    def _rpc_plex_list_playlists(self, params: dict):
+        """List audio playlists currently on the Plex server (for viewing)."""
+        from core.plex_client import PlexClient
+        from core.plex_config import load_plex_config
+        config = load_plex_config()
+        if not config.server_url or not config.token:
+            raise ValueError("Plex is not configured")
+        client = PlexClient(config.server_url, config.token)
+        client.test_connection()
+        return client.get_playlists()
+
+    def _rpc_plex_present_paths(self, params: dict):
+        """Return the device relative_paths that also exist on Plex — presence
+        only, matched in memory (filename then artist+title), no per-file tag
+        reads. Lets the Library tag each track's location."""
+        from core.plex_client import PlexClient
+        from core.plex_config import load_plex_config
+        from core.utils import normalize_for_matching
+        config = load_plex_config()
+        if not config.server_url or not config.token:
+            raise ValueError("Plex is not configured")
+        client = PlexClient(config.server_url, config.token)
+        client.test_connection()
+        sections = client.get_music_sections()
+        if not sections:
+            return []
+        section = sections[0]
+        for s in sections:
+            if s["key"] == config.last_section_key:
+                section = s
+                break
+        all_plex = client.get_all_tracks(section["key"])
+        file_lookup = client.build_file_lookup(all_plex)
+        title_lookup = client.build_lookup(all_plex)
+
+        present = []
+        for dt in self._session.device_tracks:
+            hit = None
+            if dt.file_path:
+                hit = file_lookup.get(os.path.basename(str(dt.file_path)).lower())
+            if not hit:
+                hit = file_lookup.get(os.path.basename(dt.relative_path).lower())
+            if not hit:
+                key = (normalize_for_matching(dt.artist), normalize_for_matching(dt.title))
+                if title_lookup.get(key):
+                    hit = True
+            if hit:
+                present.append(dt.relative_path)
+        return present
+
+    def _folder_basenames(self, path_str: str) -> set:
+        """Lowercased audio-file basenames under a folder — no tag reads, fast."""
+        from core.local_scanner import AUDIO_EXTENSIONS
+        root = Path(path_str)
+        names = set()
+        if not root.exists():
+            return names
+        for dirpath, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for n in files:
+                if not n.startswith(".") and Path(n).suffix.lower() in AUDIO_EXTENSIONS:
+                    names.add(n.lower())
+        return names
+
+    def _plex_keys(self, progress=None) -> set:
+        from core.plex_client import PlexClient
+        from core.plex_config import load_plex_config
+        from core.utils import normalize_for_matching
+        cfg = load_plex_config()
+        client = PlexClient(cfg.server_url, cfg.token)
+        client.test_connection()
+        sections = client.get_music_sections()
+        if not sections:
+            return set()
+        section = sections[0]
+        for s in sections:
+            if s["key"] == cfg.last_section_key:
+                section = s
+                break
+        return {(normalize_for_matching(t["artist"]), normalize_for_matching(t["title"]))
+                for t in client.get_all_tracks(section["key"], progress)}
+
+    def _spotify_keys(self, progress=None) -> set:
+        from core.spotify_client import SpotifyClient
+        from core.utils import normalize_for_matching
+        _m, tracks = SpotifyClient().fetch_full_library(
+            include_playlists=True, progress=progress or (lambda *a: None))
+        return {(normalize_for_matching(getattr(t, "artist", "")),
+                 normalize_for_matching(getattr(t, "title", "")))
+                for t in tracks}
+
+    def _rpc_pool_locations(self, params: dict):
+        """Tag every current track by which sources hold it — master library,
+        device, Plex, Spotify — pooled. Local sources match by filename (fast,
+        no tag reads); Plex/Spotify by normalized artist+title. Source indexes
+        are cached per session; pass refresh:true to rebuild them."""
+        from core.utils import normalize_for_matching
+        tracks = self._session.device_tracks
+        mount = self._session.device_mount
+        is_device = bool(mount and ((mount / ".rockbox").exists() or (mount / "iPod_Control").exists()))
+        refresh = bool(params.get("refresh"))
+
+        track_base, track_key, all_paths = {}, {}, []
+        for dt in tracks:
+            track_base[dt.relative_path] = os.path.basename(dt.relative_path).lower()
+            track_key[dt.relative_path] = (normalize_for_matching(dt.artist),
+                                           normalize_for_matching(dt.title))
+            all_paths.append(dt.relative_path)
+
+        def cached(name, builder):
+            if not refresh and name in self._src_cache:
+                return self._src_cache[name]
+            val = builder()
+            self._src_cache[name] = val
+            return val
+
+        def note(msg, cur=0, total=1):
+            self._notify("progress", {"op": "pool_locations", "current": cur, "total": total, "message": msg})
+
+        result = {}
+
+        # Library — master library folder (filename match), or all when the
+        # connected target already IS a local library.
+        from core.app_config import load_app_config
+        acfg = load_app_config()
+        if not is_device:
+            result["lib"] = {"available": True, "paths": all_paths}
+        elif acfg.master_library_path:
+            note("Scanning master library...")
+            lib_names = cached("lib:" + acfg.master_library_path,
+                               lambda: self._folder_basenames(acfg.master_library_path))
+            result["lib"] = {"available": True,
+                             "paths": [p for p in all_paths if track_base[p] in lib_names]}
+        else:
+            result["lib"] = {"available": False, "paths": []}
+
+        # Device — current target, else the last-scanned device's cached index.
+        if is_device:
+            result["dev"] = {"available": True, "paths": all_paths}
+        else:
+            from core.location_cache import load_device_index
+            idx = load_device_index()
+            if idx:
+                result["dev"] = {"available": True, "label": idx["label"],
+                                 "paths": [p for p in all_paths if track_base[p] in idx["names"]]}
+            else:
+                result["dev"] = {"available": False, "paths": []}
+
+        # Plex.
+        from core.plex_config import load_plex_config
+        pcfg = load_plex_config()
+        if pcfg.server_url and pcfg.token:
+            try:
+                note("Indexing Plex...")
+                plex_keys = cached("plex", lambda: self._plex_keys(
+                    lambda i, t: note(f"Indexing Plex... {i}/{t}", i, t or 1)))
+                result["plex"] = {"available": True,
+                                  "paths": [p for p in all_paths if track_key[p] in plex_keys]}
+            except Exception as e:
+                result["plex"] = {"available": False, "paths": [], "error": str(e)}
+        else:
+            result["plex"] = {"available": False, "paths": []}
+
+        # Spotify.
+        from core.spotify_config import load_spotify_config
+        scfg = load_spotify_config()
+        if scfg.refresh_token:
+            try:
+                note("Indexing Spotify...")
+                spot_keys = cached("spotify", lambda: self._spotify_keys(
+                    lambda cur, total, label: note(f"Indexing Spotify... {label}", cur, total or 1)))
+                result["spotify"] = {"available": True,
+                                     "paths": [p for p in all_paths if track_key[p] in spot_keys]}
+            except Exception as e:
+                result["spotify"] = {"available": False, "paths": [], "error": str(e)}
+        else:
+            result["spotify"] = {"available": False, "paths": []}
+
+        note("Done", 1, 1)
+        return result
+
+    def _rpc_clear_source_cache(self, params: dict):
+        """Drop cached source indexes so the next pool re-fetches them."""
+        self._src_cache = {}
+        return {"ok": True}
 
     def _rpc_load_plex_config(self, params: dict):
         from core.plex_config import load_plex_config
@@ -1367,7 +1745,12 @@ class RpcHandler:
         return {"ok": True}
 
     def _rpc_get_album_art(self, params: dict):
-        """Get album art as base64-encoded data."""
+        """Get album art as base64-encoded data.
+
+        Never raises on unreadable/malformed files — a tag Grapefruit can't
+        parse (e.g. a corrupt MP4 freeform atom) just reports no artwork, so
+        the album grid falls back to its placeholder instead of erroring.
+        """
         _require(params, "path")
         import base64
         file_path = self._resolve_device_path(params["path"])
@@ -1375,15 +1758,13 @@ class RpcHandler:
         import music_tag
         try:
             tag = music_tag.load_file(str(file_path))
-        except Exception as e:
-            raise ValueError(f"Cannot read file: {e}")
-
-        artwork = tag["artwork"]
-        if not artwork or not artwork.first:
+            artwork = tag["artwork"]
+            if not artwork or not artwork.first:
+                return {"has_artwork": False}
+            raw = artwork.first
+            data = raw.data if isinstance(raw.data, bytes) else bytes(raw.data)
+        except Exception:
             return {"has_artwork": False}
-
-        raw = artwork.first
-        data = raw.data if isinstance(raw.data, bytes) else bytes(raw.data)
 
         mime = "image/jpeg"
         if data[:8] == b'\x89PNG\r\n\x1a\n':
@@ -1979,6 +2360,41 @@ class RpcHandler:
             "tracks": _serialize(tracks),
         }
 
+    def _rpc_spotify_list_playlists(self, params: dict):
+        """List the user's Spotify playlists (name + track count). [] if off."""
+        from core.spotify_config import load_spotify_config
+        from core.spotify_client import SpotifyClient
+        cfg = load_spotify_config()
+        if not cfg.refresh_token:
+            return []
+        pls = SpotifyClient().fetch_user_playlists()
+        return [{"name": p.get("name", "Untitled"), "track_count": p.get("track_count", 0)} for p in pls]
+
+    def _rpc_spotify_present_paths(self, params: dict):
+        """Return device relative_paths whose artist+title match a track in the
+        user's Spotify library (liked + playlists). [] when not connected."""
+        from core.spotify_config import load_spotify_config
+        from core.spotify_client import SpotifyClient
+        from core.utils import normalize_for_matching
+        cfg = load_spotify_config()
+        if not cfg.refresh_token:
+            return []
+        client = SpotifyClient()
+
+        def progress(cur, total, label):
+            self._notify("progress", {"op": "spotify_present", "current": cur, "total": total, "message": label})
+
+        _meta, tracks = client.fetch_full_library(include_playlists=True, progress=progress)
+        lookup = set()
+        for t in tracks:
+            lookup.add((normalize_for_matching(getattr(t, "artist", "")),
+                        normalize_for_matching(getattr(t, "title", ""))))
+        present = []
+        for dt in self._session.device_tracks:
+            if (normalize_for_matching(dt.artist), normalize_for_matching(dt.title)) in lookup:
+                present.append(dt.relative_path)
+        return present
+
     # ── Export ──────────────────────────────────────────────────────
 
     def _rpc_write_text_file(self, params: dict):
@@ -1998,10 +2414,134 @@ class RpcHandler:
     def _rpc_set_app_config(self, params: dict):
         from core.app_config import load_app_config, save_app_config
         config = load_app_config()
-        if "master_library_path" in params:
-            config.master_library_path = params["master_library_path"] or ""
+        for key in ("master_library_path", "slskd_url", "slskd_api_key", "soulseek_download_dir"):
+            if key in params:
+                setattr(config, key, params[key] or "")
         save_app_config(config)
         return {"ok": True}
+
+    # ── Soulseek (via slskd) ────────────────────────────────────────
+
+    def _rpc_soulseek_status(self, params: dict):
+        from core.app_config import load_app_config
+        cfg = load_app_config()
+        configured = bool(cfg.slskd_url and cfg.slskd_api_key)
+        result = {
+            "configured": configured,
+            "url": cfg.slskd_url,
+            "download_dir": cfg.soulseek_download_dir,
+            "connected": False,
+        }
+        if configured:
+            from core.soulseek_client import SoulseekClient
+            try:
+                info = SoulseekClient(cfg.slskd_url, cfg.slskd_api_key).test_connection()
+                result["connected"] = bool(info.get("connected"))
+                result["version"] = info.get("version", "")
+                result["state"] = info.get("state", "")
+            except Exception as e:
+                result["error"] = str(e)
+        return result
+
+    def _rpc_soulseek_search(self, params: dict):
+        _require(params, "query")
+        from core.app_config import load_app_config
+        from core.soulseek_client import SoulseekClient
+        cfg = load_app_config()
+        if not (cfg.slskd_url and cfg.slskd_api_key):
+            raise ValueError("Soulseek is not configured. Add your slskd URL and API key in Settings.")
+        client = SoulseekClient(cfg.slskd_url, cfg.slskd_api_key)
+
+        def progress(responses, files):
+            self._notify("progress", {
+                "op": "soulseek_search",
+                "current": responses, "total": files,
+                "message": f"{files} files from {responses} users",
+            })
+
+        results = client.search(params["query"], progress=progress)
+        return results[:params.get("limit", 60)]
+
+    def _rpc_soulseek_download(self, params: dict):
+        _require(params, "username", "files")
+        from core.app_config import load_app_config
+        from core.soulseek_client import SoulseekClient
+        cfg = load_app_config()
+        if not (cfg.slskd_url and cfg.slskd_api_key):
+            raise ValueError("Soulseek is not configured.")
+        client = SoulseekClient(cfg.slskd_url, cfg.slskd_api_key)
+        return client.download(params["username"], params["files"])
+
+    def _rpc_soulseek_downloads(self, params: dict):
+        from core.app_config import load_app_config
+        from core.soulseek_client import SoulseekClient
+        cfg = load_app_config()
+        if not (cfg.slskd_url and cfg.slskd_api_key):
+            return []
+        return SoulseekClient(cfg.slskd_url, cfg.slskd_api_key).downloads()
+
+    def _rpc_list_incoming(self, params: dict):
+        """List audio files in the Soulseek download folder for review before
+        importing. Works on whatever landed there, independent of slskd's
+        transfer bookkeeping."""
+        from core.app_config import load_app_config
+        from core.local_scanner import AUDIO_EXTENSIONS
+        from core.utils import read_audio_metadata
+        cfg = load_app_config()
+        if not cfg.soulseek_download_dir:
+            raise ValueError("Set a Soulseek download folder in Settings first.")
+        root = Path(cfg.soulseek_download_dir)
+        if not root.exists():
+            return []
+        files = []
+        for dirpath, dirs, names in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for n in names:
+                if n.startswith(".") or Path(n).suffix.lower() not in AUDIO_EXTENSIONS:
+                    continue
+                fp = Path(dirpath) / n
+                try:
+                    size = fp.stat().st_size
+                except OSError:
+                    size = 0
+                meta = read_audio_metadata(fp)
+                files.append({
+                    "path": str(fp),
+                    "name": n,
+                    "title": meta.get("title", ""),
+                    "artist": meta.get("artist", ""),
+                    "album": meta.get("album", ""),
+                    "format": Path(n).suffix.lstrip(".").lower(),
+                    "size": size,
+                })
+        files.sort(key=lambda f: f["name"].lower())
+        return files
+
+    def _rpc_import_incoming(self, params: dict):
+        """Move reviewed download-folder files into the library hub."""
+        _require(params, "paths")
+        if not self._session.device_mount:
+            raise ValueError("Connect your library first.")
+        mount = self._session.device_mount
+        dest_dir = mount / params.get("dest_folder", "Music")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        moved, errors = [], []
+        for p in params["paths"]:
+            src = Path(p)
+            if not src.exists():
+                errors.append(f"Not found: {src.name}")
+                continue
+            dst = dest_dir / src.name
+            counter = 1
+            while dst.exists():
+                dst = dest_dir / f"{src.stem}_{counter}{src.suffix}"
+                counter += 1
+            try:
+                shutil.move(str(src), str(dst))
+                moved.append(str(dst))
+            except OSError as e:
+                errors.append(f"{src.name}: {e}")
+        return {"moved": len(moved), "errors": errors}
 
     # ── Updates ─────────────────────────────────────────────────────
 

@@ -2,6 +2,9 @@ import { rpcCall } from "./sidecar";
 
 export interface AppConfig {
   master_library_path: string;
+  slskd_url?: string;
+  slskd_api_key?: string;
+  soulseek_download_dir?: string;
 }
 
 export async function getAppConfig(): Promise<AppConfig> {

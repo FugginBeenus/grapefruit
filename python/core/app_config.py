@@ -16,6 +16,10 @@ CONFIG_PATH = Path.home() / ".grapefruit" / "app_config.json"
 @dataclass
 class AppConfig:
     master_library_path: str = ""
+    # Soulseek (via a headless slskd daemon the user runs and points us at).
+    slskd_url: str = ""
+    slskd_api_key: str = ""
+    soulseek_download_dir: str = ""
 
 
 def load_app_config() -> AppConfig:
@@ -23,7 +27,12 @@ def load_app_config() -> AppConfig:
         return AppConfig()
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        return AppConfig(master_library_path=data.get("master_library_path", ""))
+        return AppConfig(
+            master_library_path=data.get("master_library_path", ""),
+            slskd_url=data.get("slskd_url", ""),
+            slskd_api_key=data.get("slskd_api_key", ""),
+            soulseek_download_dir=data.get("soulseek_download_dir", ""),
+        )
     except (json.JSONDecodeError, OSError):
         return AppConfig()
 

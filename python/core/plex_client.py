@@ -386,6 +386,12 @@ class PlexClient:
             playlists = container.get("Metadata", [])
             if playlists:
                 return playlists[0].get("ratingKey", "")
+            # Some Plex versions return an empty/non-JSON body on create even
+            # though the playlist was made. Look it up by title so we still
+            # record its ratingKey (and don't create a duplicate next sync).
+            for p in self.get_playlists():
+                if p.get("title") == title:
+                    return str(p.get("ratingKey", ""))
             return ""
         except PlexClientError:
             raise
@@ -425,11 +431,15 @@ class PlexClient:
         return resp.json()
 
     def _post(self, path: str, params: dict = None) -> dict:
-        """POST request, returning parsed JSON."""
+        """POST request. Returns parsed JSON, or {} when the server replies
+        with a 2xx and an empty/non-JSON body (Plex does this on some writes)."""
         url = self._base + path
         resp = self._session.post(url, params=params, timeout=20)
         resp.raise_for_status()
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError:
+            return {}
 
     def _put(self, path: str, params: dict = None) -> dict:
         """PUT request, returning parsed JSON."""

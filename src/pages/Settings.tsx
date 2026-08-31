@@ -4,6 +4,8 @@ import { open as openDir } from "@tauri-apps/plugin-dialog";
 import { usePlexStore } from "../stores/plexStore";
 import { useToastStore } from "../stores/toastStore";
 import { getAppConfig, setAppConfig } from "../api/appConfig";
+import { soulseekStatus, type SoulseekStatus } from "../api/soulseek";
+import soulseekLogo from "../assets/soulseek.webp";
 import {
   spotifyAuthPoll,
   spotifyAuthStart,
@@ -115,7 +117,7 @@ function SpotifyCard() {
         every playlist — in the Streaming Gap report.
       </p>
 
-      <div className="flex items-start gap-2 mb-4 p-2.5 rounded-lg bg-amber-muted border border-amber/20 text-[11px] text-amber leading-relaxed">
+      <div className="flex items-start gap-2 mb-4 p-2.5 rounded-lg border border-line text-[11px] leading-relaxed" style={{ background: "var(--amberS)", color: "var(--amber)" }}>
         <svg className="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
         </svg>
@@ -202,6 +204,101 @@ function SpotifyCard() {
   );
 }
 
+function SoulseekCard() {
+  const addToast = useToastStore((s) => s.addToast);
+  const [url, setUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [dir, setDir] = useState("");
+  const [status, setStatus] = useState<SoulseekStatus | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    getAppConfig().then((c) => {
+      setUrl(c.slskd_url || "");
+      setApiKey(c.slskd_api_key || "");
+      setDir(c.soulseek_download_dir || "");
+    }).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    await setAppConfig({ slskd_url: url.trim(), slskd_api_key: apiKey.trim(), soulseek_download_dir: dir.trim() });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      await setAppConfig({ slskd_url: url.trim(), slskd_api_key: apiKey.trim() });
+      const s = await soulseekStatus();
+      setStatus(s);
+      if (s.connected) addToast("success", `slskd connected${s.version ? ` (v${s.version})` : ""}`);
+      else if (s.error) addToast("error", s.error);
+      else addToast("info", "slskd reached, but it isn't connected to the Soulseek network yet");
+    } catch (e) {
+      addToast("error", String(e));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="card p-5 mb-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <img src={soulseekLogo} alt="Soulseek" className="w-8 h-8 rounded-lg object-contain shrink-0" />
+          <h2 className="text-sm font-bold text-ink">Soulseek</h2>
+        </div>
+        {status?.connected && (
+          <div className="flex items-center gap-1.5 text-[12px] font-medium" style={{ color: "var(--emer)" }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: "var(--emer)" }} />
+            Connected
+          </div>
+        )}
+      </div>
+
+      <p className="text-[12px] text-ink3 leading-relaxed mb-3">
+        Fill gaps from Soulseek by pointing Grapefruit at a running <strong>slskd</strong> daemon — it signs in with your Soulseek account and exposes an API. Grapefruit never joins the network itself.
+      </p>
+
+      <div className="space-y-3">
+        <Field label="slskd URL" placeholder="http://localhost:5030" value={url} onChange={setUrl} hint="Where your slskd instance is reachable." />
+        <Field label="API key" placeholder="Your slskd API key" value={apiKey} onChange={setApiKey} type="password" />
+        <div>
+          <label className="block text-[12px] font-semibold text-t-secondary mb-1.5">Download folder</label>
+          <div className="flex gap-2">
+            <input type="text" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Where downloads land (defaults to your hub)" className="input flex-1" />
+            <button onClick={async () => { const sel = await openDir({ directory: true, multiple: false, title: "Select download folder" }); if (sel) setDir(typeof sel === "string" ? sel : String(sel)); }} className="btn btn-secondary shrink-0">Browse</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 mt-4">
+        <button onClick={test} disabled={testing || !url.trim() || !apiKey.trim()} className="btn btn-secondary text-xs">{testing ? "Testing..." : "Test connection"}</button>
+        <button onClick={save} className="btn btn-primary text-xs">Save</button>
+        {saved && <span className="text-[12px] font-medium" style={{ color: "var(--emer)" }}>Saved</span>}
+        {status && !status.connected && status.error && <span className="text-[11px] text-err">{status.error}</span>}
+      </div>
+
+      <div className="mt-4">
+        <button onClick={() => setShowHelp(!showHelp)} className="flex items-center gap-1.5 text-[11px] text-ink3 hover:text-ink2 transition-colors">
+          <svg className={`w-3 h-3 transition-transform ${showHelp ? "rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+          How to set up slskd
+        </button>
+        {showHelp && (
+          <ol className="text-[12px] text-ink2 space-y-1.5 list-decimal list-inside leading-relaxed mt-3 pl-1">
+            <li>Install and run <button onClick={() => openUrl("https://github.com/slskd/slskd")} className="text-brand hover:opacity-80 underline">slskd</button> (Docker or a binary) and sign in with your Soulseek account.</li>
+            <li>In slskd's config, enable the web API and set an <strong>API key</strong>.</li>
+            <li>Put slskd's URL and that API key here, then Test connection.</li>
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const {
     config, connected, serverName, testing, error,
@@ -214,6 +311,18 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   const [showTokenHelp, setShowTokenHelp] = useState(false);
   const [masterLibPath, setMasterLibPath] = useState("");
+
+  const libRef = useRef<HTMLDivElement>(null);
+  const spotRef = useRef<HTMLDivElement>(null);
+  const plexRef = useRef<HTMLDivElement>(null);
+  const soulseekRef = useRef<HTMLDivElement>(null);
+  const aboutRef = useRef<HTMLDivElement>(null);
+  const [activeNav, setActiveNav] = useState("library");
+  const go = (key: string) => {
+    setActiveNav(key);
+    const el = key === "library" ? libRef.current : key === "spotify" ? spotRef.current : key === "plex" ? plexRef.current : key === "soulseek" ? soulseekRef.current : aboutRef.current;
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   // Library settings (localStorage only)
   const [orgPattern, setOrgPattern] = useState<OrgPattern>(
@@ -257,14 +366,26 @@ export default function Settings() {
   };
 
   return (
-    <div className="max-w-xl">
-      <div className="mb-6 pt-2">
-        <h1 className="text-3xl font-bold text-t tracking-tight">Settings</h1>
-        <p className="text-sm text-t-muted mt-1">Manage your app preferences and server connections</p>
-      </div>
+    <div className="grid gap-[18px] max-w-[1150px]" style={{ gridTemplateColumns: "180px minmax(0,1fr)" }}>
+      {/* Sub-nav */}
+      <nav className="flex flex-col gap-0.5 self-start sticky top-0">
+        <div className="font-mono text-[9px] tracking-[.16em] text-ink3 px-3 pb-2">SETTINGS</div>
+        {[["library", "Library"], ["spotify", "Spotify"], ["plex", "Plex"], ["soulseek", "Soulseek"], ["about", "About"]].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => go(key)}
+            className="text-left px-3 py-2 rounded-xl text-[13px] transition-colors"
+            style={activeNav === key ? { background: "var(--brandS)", color: "var(--brand)", fontWeight: 700 } : { color: "var(--ink2)", fontWeight: 500 }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
+      {/* Panels */}
+      <div className="flex flex-col min-w-0">
       {/* Library */}
-      <div className="card p-5 mb-4">
+      <div ref={libRef} className="card p-5 mb-4">
         <div className="flex items-center gap-3 mb-4">
           <div className="icon-box icon-box-md icon-box-amber">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>
@@ -324,10 +445,10 @@ export default function Settings() {
       </div>
 
       {/* Spotify */}
-      <SpotifyCard />
+      <div ref={spotRef}><SpotifyCard /></div>
 
       {/* Plex Server */}
-      <div className="card p-5 mb-4">
+      <div ref={plexRef} className="card p-5 mb-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#1b1b20", border: "1px solid rgba(229,160,13,0.25)" }}>
@@ -417,15 +538,18 @@ export default function Settings() {
         <div className="p-4 rounded-xl bg-err-muted border border-err/20 text-[13px] text-err mb-4">{error}</div>
       )}
 
+      {/* Soulseek */}
+      <div ref={soulseekRef}><SoulseekCard /></div>
+
       {/* About */}
-      <div className="card p-5">
+      <div ref={aboutRef} className="card p-5">
         <div className="flex items-center gap-3 mb-3">
           <div className="icon-box icon-box-md icon-box-gf">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
           </div>
           <h2 className="text-sm font-bold text-t">About</h2>
         </div>
-        <p className="text-[13px] text-t-secondary font-medium">Grapefruit v2.2.0</p>
+        <p className="text-[13px] text-t-secondary font-medium">Grapefruit v2.3.0</p>
         <p className="text-[12px] text-t-muted mt-1">
           Music sync manager — keep streaming, Plex, and your devices in step with the library you own
         </p>
@@ -437,6 +561,7 @@ export default function Settings() {
         >
           github.com/FugginBeenus/grapefruit
         </a>
+      </div>
       </div>
     </div>
   );

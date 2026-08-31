@@ -1,12 +1,14 @@
 import { create } from "zustand";
 import type { DeviceInfo, DeviceTrack, PlaylistInfo } from "../types/models";
-import { scanDevices, setDevice } from "../api/device";
+import { scanDevices, setDevice, setDeviceManual, setIpod, clearIpod } from "../api/device";
 import { scanDeviceLibrary, getPlaylists } from "../api/library";
 import { rpcCall } from "../api/sidecar";
 
 interface DeviceState {
   devices: DeviceInfo[];
   selectedDevice: DeviceInfo | null;
+  ipod: DeviceInfo | null;
+  ipodConnecting: boolean;
   tracks: DeviceTrack[];
   playlists: PlaylistInfo[];
   scanning: boolean;
@@ -17,6 +19,10 @@ interface DeviceState {
   scanForDevices: () => Promise<void>;
   selectDevice: (device: DeviceInfo) => Promise<void>;
   connectLocalLibrary: (path: string) => Promise<void>;
+  connectDeviceManual: (path: string) => Promise<void>;
+  connectIpod: (device: DeviceInfo) => Promise<void>;
+  connectIpodManual: (path: string) => Promise<void>;
+  disconnectIpod: () => void;
   refreshLibrary: () => Promise<void>;
   refreshPlaylists: () => Promise<void>;
   disconnect: () => void;
@@ -25,6 +31,8 @@ interface DeviceState {
 export const useDeviceStore = create<DeviceState>((set, get) => ({
   devices: [],
   selectedDevice: null,
+  ipod: null,
+  ipodConnecting: false,
   tracks: [],
   playlists: [],
   scanning: false,
@@ -37,9 +45,10 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
     try {
       const devices = await scanDevices();
       set({ devices, scanning: false });
-      // Auto-select first device if none selected
-      if (devices.length > 0 && !get().selectedDevice) {
-        await get().selectDevice(devices[0]);
+      // Detected iPods populate the device slot for the user to connect — they
+      // no longer hijack the primary (library) connection.
+      if (devices.length > 0 && !get().ipod && !get().selectedDevice) {
+        await get().connectIpod(devices[0]);
       }
     } catch (e) {
       set({ scanning: false, error: String(e) });
@@ -63,6 +72,45 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
       set({ scanning: false, error: String(e) });
       throw e; // re-throw so callers can handle
     }
+  },
+
+  connectDeviceManual: async (path: string) => {
+    set({ scanning: true, error: null });
+    try {
+      const device = await setDeviceManual(path);
+      set({ selectedDevice: device, scanning: false });
+      await Promise.all([get().refreshLibrary(), get().refreshPlaylists()]);
+    } catch (e) {
+      set({ scanning: false, error: String(e) });
+      throw e; // re-throw so callers can handle
+    }
+  },
+
+  connectIpod: async (device: DeviceInfo) => {
+    set({ ipodConnecting: true, error: null });
+    try {
+      const info = await setIpod(device.mount_point);
+      set({ ipod: info, ipodConnecting: false });
+    } catch (e) {
+      set({ ipodConnecting: false, error: String(e) });
+      throw e;
+    }
+  },
+
+  connectIpodManual: async (path: string) => {
+    set({ ipodConnecting: true, error: null });
+    try {
+      const info = await setIpod(path);
+      set({ ipod: info, ipodConnecting: false });
+    } catch (e) {
+      set({ ipodConnecting: false, error: String(e) });
+      throw e;
+    }
+  },
+
+  disconnectIpod: () => {
+    clearIpod().catch(() => {});
+    set({ ipod: null });
   },
 
   refreshLibrary: async () => {

@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.3.0] - 2026-08-26
+
+### Added
+- A full visual redesign with matching light and dark themes, toggled from the sidebar.
+- Connect all your sources at the same time. Your library, your iPod, Plex, and Spotify each get their own slot, and the sidebar shows what is connected.
+- Location tags. Every track can be tagged by where it lives (Library, Device, Plex, Spotify), pooled from every source at once.
+- Playlists are pulled from your library, iPod, Plex, and Spotify into one list, each tagged by source. Edit a playlist in your library, then Sync to iPod (which copies over any missing songs first) or Push to Plex.
+- Soulseek support through a slskd daemon. Search for the tracks your Streaming Gap is missing and download them, then review the tags and art before adding them to your library.
+- A manual "Locate device" option for iPods that auto-detection misses.
+- A "not a duplicate" action in the duplicate finder, for songs that are just different versions.
+- More sort options in the Library, and real album art in the album view.
+
+### Fixed
+- Album art no longer errors on files with unreadable tags.
+- The Library reconnects your saved hub folder on launch.
+- Plex playlist creation is more reliable, and you can now view your Plex playlists inside the app.
+
 ## [2.2.4] - 2026-06-15
 
 ### Fixed

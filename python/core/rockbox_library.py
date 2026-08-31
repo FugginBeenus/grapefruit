@@ -33,27 +33,34 @@ class RockboxLibrary:
         total = len(audio_files)
         self._tracks = []
 
-        # Phase 2: read metadata
+        # Phase 2: read metadata. Every audio file found is counted — a
+        # metadata or stat hiccup degrades a track's fields, it never drops
+        # the track, so the count matches the files actually on disk.
         for i, file_path in enumerate(audio_files):
             try:
                 meta = read_audio_metadata(file_path)
-                relative = str(file_path.relative_to(self._root))
-                file_size = file_path.stat().st_size
-
-                track = DeviceTrack(
-                    file_path=file_path,
-                    relative_path=relative,
-                    title=meta.get("title", file_path.stem),
-                    artist=meta.get("artist", ""),
-                    album=meta.get("album", ""),
-                    duration_seconds=meta.get("duration_seconds"),
-                    track_number=meta.get("track_number"),
-                    file_size=file_size,
-                    format=file_path.suffix.lstrip(".").lower(),
-                )
-                self._tracks.append(track)
             except Exception:
-                pass
+                meta = {}
+            try:
+                relative = str(file_path.relative_to(self._root))
+            except ValueError:
+                relative = file_path.name
+            try:
+                file_size = file_path.stat().st_size
+            except OSError:
+                file_size = 0
+
+            self._tracks.append(DeviceTrack(
+                file_path=file_path,
+                relative_path=relative,
+                title=meta.get("title") or file_path.stem,
+                artist=meta.get("artist", ""),
+                album=meta.get("album", ""),
+                duration_seconds=meta.get("duration_seconds"),
+                track_number=meta.get("track_number"),
+                file_size=file_size,
+                format=file_path.suffix.lstrip(".").lower(),
+            ))
 
             if progress_callback and (i % 50 == 0 or i == total - 1):
                 progress_callback(i + 1, total)
