@@ -209,6 +209,7 @@ function SoulseekCard() {
   const [url, setUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [dir, setDir] = useState("");
+  const [searchTimeout, setSearchTimeout] = useState("30");
   const [status, setStatus] = useState<SoulseekStatus | null>(null);
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -219,11 +220,12 @@ function SoulseekCard() {
       setUrl(c.slskd_url || "");
       setApiKey(c.slskd_api_key || "");
       setDir(c.soulseek_download_dir || "");
+      setSearchTimeout(String(c.soulseek_search_timeout ?? 30));
     }).catch(() => {});
   }, []);
 
   const save = async () => {
-    await setAppConfig({ slskd_url: url.trim(), slskd_api_key: apiKey.trim(), soulseek_download_dir: dir.trim() });
+    await setAppConfig({ slskd_url: url.trim(), slskd_api_key: apiKey.trim(), soulseek_download_dir: dir.trim(), soulseek_search_timeout: Number(searchTimeout) || 30 });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -272,6 +274,14 @@ function SoulseekCard() {
             <input type="text" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="Where downloads land (defaults to your hub)" className="input flex-1" />
             <button onClick={async () => { const sel = await openDir({ directory: true, multiple: false, title: "Select download folder" }); if (sel) setDir(typeof sel === "string" ? sel : String(sel)); }} className="btn btn-secondary shrink-0">Browse</button>
           </div>
+        </div>
+        <div>
+          <label className="block text-[12px] font-semibold text-t-secondary mb-1.5">Search wait time</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min={5} max={120} value={searchTimeout} onChange={(e) => setSearchTimeout(e.target.value)} className="input w-24" />
+            <span className="text-[12px] text-ink3">seconds</span>
+          </div>
+          <p className="text-[11px] text-ink3 mt-1.5">How long to wait for results. Raise it if slow searches come back empty.</p>
         </div>
       </div>
 

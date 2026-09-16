@@ -5,6 +5,7 @@ export interface AppConfig {
   slskd_url?: string;
   slskd_api_key?: string;
   soulseek_download_dir?: string;
+  soulseek_search_timeout?: number;
 }
 
 export async function getAppConfig(): Promise<AppConfig> {

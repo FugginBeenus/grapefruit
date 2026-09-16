@@ -2412,11 +2412,13 @@ class RpcHandler:
         return _serialize(load_app_config())
 
     def _rpc_set_app_config(self, params: dict):
-        from core.app_config import load_app_config, save_app_config
+        from core.app_config import _clamp_timeout, load_app_config, save_app_config
         config = load_app_config()
         for key in ("master_library_path", "slskd_url", "slskd_api_key", "soulseek_download_dir"):
             if key in params:
                 setattr(config, key, params[key] or "")
+        if "soulseek_search_timeout" in params:
+            config.soulseek_search_timeout = _clamp_timeout(params["soulseek_search_timeout"])
         save_app_config(config)
         return {"ok": True}
 
@@ -2459,7 +2461,8 @@ class RpcHandler:
                 "message": f"{files} files from {responses} users",
             })
 
-        results = client.search(params["query"], progress=progress)
+        timeout = params.get("timeout") or cfg.soulseek_search_timeout
+        results = client.search(params["query"], timeout=timeout, progress=progress)
         return results[:params.get("limit", 60)]
 
     def _rpc_soulseek_download(self, params: dict):

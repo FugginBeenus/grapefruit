@@ -51,7 +51,7 @@ class SoulseekClient:
 
     # ── Search ───────────────────────────────────────────────────────
 
-    def search(self, query: str, timeout: float = 12.0,
+    def search(self, query: str, timeout: float = 30.0,
                progress=None) -> list[dict]:
         """Run a search and return flattened file candidates, best-ranked first.
 

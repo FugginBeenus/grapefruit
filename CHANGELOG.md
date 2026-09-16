@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.3.1] - 2026-09-16
+
+### Fixed
+- Soulseek searches no longer come back empty when they run long. Grapefruit now waits 30 seconds by default, and you can change the wait time in Settings under Soulseek.
+
 ## [2.3.0] - 2026-08-26
 
 ### Added

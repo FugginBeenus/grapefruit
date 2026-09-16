@@ -20,6 +20,15 @@ class AppConfig:
     slskd_url: str = ""
     slskd_api_key: str = ""
     soulseek_download_dir: str = ""
+    # How long to wait for search results before returning what came in.
+    soulseek_search_timeout: int = 30
+
+
+def _clamp_timeout(value) -> int:
+    try:
+        return max(5, min(120, int(value)))
+    except (TypeError, ValueError):
+        return 30
 
 
 def load_app_config() -> AppConfig:
@@ -32,6 +41,7 @@ def load_app_config() -> AppConfig:
             slskd_url=data.get("slskd_url", ""),
             slskd_api_key=data.get("slskd_api_key", ""),
             soulseek_download_dir=data.get("soulseek_download_dir", ""),
+            soulseek_search_timeout=_clamp_timeout(data.get("soulseek_search_timeout", 30)),
         )
     except (json.JSONDecodeError, OSError):
         return AppConfig()
